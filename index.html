@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jellifox</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+        color: #e8e2d5;
+        background: radial-gradient(1200px 600px at 50% -10%, #2e2118, #1c1a17 60%);
+      }
+      main {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        padding: 24px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(32px, 7vw, 56px);
+        letter-spacing: 2px;
+        color: #c9a86a;
+      }
+      p.lead {
+        margin: 0;
+        max-width: 36rem;
+        color: #9a917f;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        justify-content: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 26px;
+        border-radius: 10px;
+        font-size: 16px;
+        text-decoration: none;
+        border: 1px solid #c0392b;
+        background: linear-gradient(180deg, #a6342a, #8e2f23);
+        color: #fff;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      }
+      .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5); }
+      .btn .icon { font-size: 18px; }
+      footer {
+        position: fixed;
+        bottom: 14px;
+        font-size: 12px;
+        color: #6b6456;
+      }
+      footer a { color: #9a917f; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>jellifox</h1>
+      <p class="lead">个人项目入口。下面是基于《5E不全书》实时数据的 DND 5R 自动车卡工具。</p>
+      <div class="links">
+        <a class="btn" href="./dnd/"><span class="icon">🎲</span> DND 5R 自动车卡</a>
+      </div>
+    </main>
+    <footer>
+      <a href="https://github.com/jellifox" target="_blank" rel="noopener">github.com/jellifox</a>
+    </footer>
+  </body>
+</html>
