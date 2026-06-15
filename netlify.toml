@@ -1,7 +1,11 @@
-# 纯静态站点：无需构建，直接发布仓库根目录。
+# Pure static site: nothing to build, just publish the repo root.
+# `command = "true"` is an explicit no-op that always exits 0, overriding
+# any stale build command auto-detected from the old Hexo setup.
 [build]
   publish = "."
-  command = ""
+  command = "true"
 
-# DnD 车卡是单页应用（无后端、无客户端路由），静态资源用相对路径，
-# 无需额外重写规则。如需自定义 404 可在此添加 redirects。
+# No secrets in this public static repo; skip scanning to avoid false
+# positives on the minified DnD bundle under dnd/assets.
+[build.environment]
+  SECRETS_SCAN_ENABLED = "false"
