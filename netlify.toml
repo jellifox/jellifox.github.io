@@ -1,9 +1,11 @@
-# 纯静态站点：无需构建，直接发布仓库根目录。
-# command 必须是一个能退出 0 的真实命令——空字符串会被 Netlify 当作「未设置」，
-# 从而回退到 UI 检测到的构建命令并以非零码失败。这里用 no-op 显式覆盖。
+# Pure static site: nothing to build, just publish the repo root.
+# `command = "true"` is an explicit no-op that always exits 0, overriding
+# any stale build command auto-detected from the old Hexo setup.
 [build]
   publish = "."
-  command = "echo 'Static site, no build step.'"
+  command = "true"
 
-# DnD 车卡是单页应用（无后端、无客户端路由），静态资源用相对路径，
-# 无需额外重写规则。如需自定义 404 可在此添加 redirects。
+# No secrets in this public static repo; skip scanning to avoid false
+# positives on the minified DnD bundle under dnd/assets.
+[build.environment]
+  SECRETS_SCAN_ENABLED = "false"
