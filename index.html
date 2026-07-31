@@ -6,75 +6,303 @@
     <title>jellifox</title>
     <style>
       * { box-sizing: border-box; }
-      html, body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-        color: #e8e2d5;
-        background: radial-gradient(1200px 600px at 50% -10%, #2e2118, #1c1a17 60%);
+      :root {
+        --sky-1: #bfeaff;
+        --sky-2: #8fd6f2;
+        --aqua: #4fc3d9;
+        --mint: #b8f0d8;
+        --leaf: #57c98a;
+        --leaf-d: #2f9e63;
+        --ink: #0d4a5c;
       }
+      html, body { margin: 0; height: 100%; }
+      body {
+        min-height: 100vh;
+        overflow-x: hidden;
+        font-family: 'PingFang SC', 'Hiragino Sans GB', 'Segoe UI', system-ui, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(120% 90% at 50% 120%, var(--mint) 0%, transparent 55%),
+          linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 45%, var(--aqua) 100%);
+        background-attachment: fixed;
+      }
+
+      /* soft sun glow + gloss across the whole sky */
+      body::before {
+        content: "";
+        position: fixed; inset: 0; pointer-events: none;
+        background:
+          radial-gradient(40% 30% at 78% 12%, rgba(255,255,255,.85), transparent 70%),
+          radial-gradient(60% 40% at 20% 0%, rgba(255,255,255,.45), transparent 60%);
+        mix-blend-mode: screen;
+      }
+
+      /* ---------- floating bubbles ---------- */
+      .bubbles { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+      .bubble {
+        position: absolute;
+        bottom: -12vh;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 32% 28%, rgba(255,255,255,.95) 0 8%, rgba(255,255,255,.25) 22%, rgba(255,255,255,0) 45%),
+          radial-gradient(circle at 70% 78%, rgba(120,220,255,.5), rgba(120,220,255,0) 60%);
+        border: 1px solid rgba(255,255,255,.55);
+        box-shadow: inset 0 0 12px rgba(255,255,255,.6), 0 2px 8px rgba(40,120,150,.18);
+        animation: rise linear infinite;
+        opacity: 0;
+      }
+      @keyframes rise {
+        0%   { transform: translateY(0) translateX(0) scale(.9); opacity: 0; }
+        10%  { opacity: .9; }
+        50%  { transform: translateY(-55vh) translateX(20px) scale(1); }
+        90%  { opacity: .8; }
+        100% { transform: translateY(-118vh) translateX(-10px) scale(1.05); opacity: 0; }
+      }
+
+      /* ---------- swimming goldfish ---------- */
+      .fish-lane { position: fixed; left: 0; right: 0; pointer-events: none; z-index: 2; }
+      .fish-lane.l1 { top: 22%; }
+      .fish-lane.l2 { top: 64%; }
+      .fish {
+        position: absolute; left: -16vw;
+        width: 150px;
+        animation: swim linear infinite;
+        will-change: transform;
+      }
+      .fish.small { width: 92px; filter: blur(.4px) saturate(.9); opacity: .82; }
+      .fish .body-bob { animation: bob 3.2s ease-in-out infinite; transform-origin: center; }
+      .fish .tail { animation: wag 0.7s ease-in-out infinite; transform-origin: 86% 50%; }
+      @keyframes swim {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(132vw); }
+      }
+      @keyframes bob  { 0%,100% { transform: translateY(-6px) rotate(-2deg); } 50% { transform: translateY(6px) rotate(2deg); } }
+      @keyframes wag  { 0%,100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+
+      /* ---------- layout ---------- */
       main {
+        position: relative; z-index: 5;
         min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 28px;
-        padding: 24px;
-        text-align: center;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 26px; padding: 24px; text-align: center;
       }
+
+      /* frosted glass card */
+      .card {
+        position: relative;
+        padding: 46px 44px 40px;
+        border-radius: 30px;
+        background: linear-gradient(160deg, rgba(255,255,255,.62), rgba(255,255,255,.28));
+        border: 1.5px solid rgba(255,255,255,.7);
+        backdrop-filter: blur(22px) saturate(1.5);
+        -webkit-backdrop-filter: blur(22px) saturate(1.5);
+        box-shadow:
+          0 22px 60px rgba(30,110,140,.28),
+          inset 0 1px 0 rgba(255,255,255,.9),
+          inset 0 -22px 40px rgba(120,210,235,.18);
+        max-width: 30rem;
+      }
+      /* glossy top sheen */
+      .card::before {
+        content: ""; position: absolute; left: 6%; right: 6%; top: 5px; height: 42%;
+        border-radius: 26px 26px 60% 60%;
+        background: linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,0));
+        pointer-events: none;
+      }
+      /* dewdrop clinging to the card */
+      .dew {
+        position: absolute; width: 26px; height: 30px; right: 30px; top: -13px;
+        background: radial-gradient(circle at 36% 30%, #fff 0 14%, rgba(170,230,255,.55) 40%, rgba(120,200,235,.35) 70%);
+        border-radius: 50% 50% 50% 50% / 62% 62% 40% 40%;
+        box-shadow: inset 0 -3px 6px rgba(80,170,210,.5), 0 4px 8px rgba(40,120,150,.25);
+        border: 1px solid rgba(255,255,255,.6);
+      }
+
       h1 {
-        margin: 0;
-        font-size: clamp(32px, 7vw, 56px);
-        letter-spacing: 2px;
-        color: #c9a86a;
+        margin: 0 0 6px;
+        font-size: clamp(40px, 9vw, 68px);
+        font-weight: 800; letter-spacing: 1px;
+        background: linear-gradient(180deg, #1fb6c9 0%, #1d8fb8 45%, #2f9e63 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        text-shadow: 0 2px 1px rgba(255,255,255,.6);
+        filter: drop-shadow(0 4px 10px rgba(40,150,180,.25));
       }
       p.lead {
-        margin: 0;
-        max-width: 36rem;
-        color: #9a917f;
-        font-size: 15px;
-        line-height: 1.7;
+        margin: 0 auto; max-width: 24rem;
+        color: #1a6075; font-size: 15px; line-height: 1.75; font-weight: 500;
       }
-      .links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px;
-        justify-content: center;
-      }
+
+      .links { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+
+      /* glossy gel button */
       .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 12px 26px;
-        border-radius: 10px;
-        font-size: 16px;
-        text-decoration: none;
-        border: 1px solid #c0392b;
-        background: linear-gradient(180deg, #a6342a, #8e2f23);
-        color: #fff;
-        transition: transform 0.12s ease, box-shadow 0.12s ease;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        position: relative; overflow: hidden;
+        display: inline-flex; align-items: center; gap: 10px;
+        padding: 15px 30px; border-radius: 999px;
+        font-size: 16px; font-weight: 700; text-decoration: none; color: #fff;
+        background: linear-gradient(180deg, #6fe0a3 0%, #43c98a 48%, #2aa56e 100%);
+        border: 1px solid rgba(255,255,255,.55);
+        box-shadow:
+          0 10px 24px rgba(34,150,95,.4),
+          inset 0 1px 0 rgba(255,255,255,.9),
+          inset 0 -10px 16px rgba(20,110,70,.35);
+        text-shadow: 0 1px 2px rgba(20,90,60,.35);
+        transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
       }
-      .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5); }
-      .btn .icon { font-size: 18px; }
+      .btn::before { /* top gloss */
+        content: ""; position: absolute; left: 8%; right: 8%; top: 3px; height: 45%;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(255,255,255,.75), rgba(255,255,255,0));
+        pointer-events: none;
+      }
+      .btn:hover { transform: translateY(-2px); filter: saturate(1.1) brightness(1.03);
+        box-shadow: 0 16px 30px rgba(34,150,95,.46), inset 0 1px 0 rgba(255,255,255,.95), inset 0 -10px 16px rgba(20,110,70,.35); }
+      .btn:active { transform: translateY(1px); }
+      .btn .icon { font-size: 19px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.2)); }
+
+      /* decorative glossy apple */
+      .apple {
+        position: fixed; z-index: 3; width: 120px; right: 6vw; bottom: 7vh;
+        animation: floaty 6s ease-in-out infinite;
+        filter: drop-shadow(0 14px 22px rgba(40,120,80,.35));
+      }
+      @keyframes floaty { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-16px) rotate(3deg); } }
+
       footer {
-        position: fixed;
-        bottom: 14px;
-        font-size: 12px;
-        color: #6b6456;
+        position: fixed; bottom: 14px; left: 0; right: 0; z-index: 5;
+        text-align: center; font-size: 12px; color: #2a7a92;
       }
-      footer a { color: #9a917f; }
+      footer a { color: #166a86; text-decoration: none; font-weight: 600; }
+      footer a:hover { text-decoration: underline; }
+
+      @media (max-width: 560px) {
+        .apple { width: 84px; right: 4vw; bottom: 4vh; }
+        .fish { width: 110px; }
+        .card { padding: 38px 26px 34px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bubble, .fish, .fish .tail, .fish .body-bob, .apple { animation: none; }
+        .fish { display: none; }
+      }
     </style>
   </head>
   <body>
+    <!-- bubbles -->
+    <div class="bubbles">
+      <span class="bubble" style="left:6%;  width:18px; height:18px; animation-duration:16s; animation-delay:0s"></span>
+      <span class="bubble" style="left:14%; width:34px; height:34px; animation-duration:22s; animation-delay:3s"></span>
+      <span class="bubble" style="left:22%; width:10px; height:10px; animation-duration:13s; animation-delay:6s"></span>
+      <span class="bubble" style="left:33%; width:48px; height:48px; animation-duration:26s; animation-delay:1s"></span>
+      <span class="bubble" style="left:45%; width:14px; height:14px; animation-duration:15s; animation-delay:8s"></span>
+      <span class="bubble" style="left:54%; width:26px; height:26px; animation-duration:20s; animation-delay:4s"></span>
+      <span class="bubble" style="left:63%; width:12px; height:12px; animation-duration:14s; animation-delay:2s"></span>
+      <span class="bubble" style="left:72%; width:40px; height:40px; animation-duration:24s; animation-delay:7s"></span>
+      <span class="bubble" style="left:81%; width:20px; height:20px; animation-duration:18s; animation-delay:5s"></span>
+      <span class="bubble" style="left:90%; width:30px; height:30px; animation-duration:21s; animation-delay:9s"></span>
+      <span class="bubble" style="left:40%; width:8px;  height:8px;  animation-duration:12s; animation-delay:11s"></span>
+      <span class="bubble" style="left:68%; width:9px;  height:9px;  animation-duration:13s; animation-delay:10s"></span>
+    </div>
+
+    <!-- goldfish -->
+    <div class="fish-lane l1">
+      <svg class="fish" viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <radialGradient id="gf-body" cx="38%" cy="34%" r="75%">
+            <stop offset="0%" stop-color="#ffd58a"/>
+            <stop offset="42%" stop-color="#ff9e3d"/>
+            <stop offset="100%" stop-color="#f2671e"/>
+          </radialGradient>
+          <linearGradient id="gf-fin" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ffb463" stop-opacity=".95"/>
+            <stop offset="100%" stop-color="#ff7a2e" stop-opacity=".6"/>
+          </linearGradient>
+        </defs>
+        <g class="body-bob">
+          <g class="tail">
+            <path d="M104 45 C132 18 150 14 156 22 C146 34 150 40 156 45 C150 50 146 56 156 68 C150 76 132 72 104 45 Z" fill="url(#gf-fin)"/>
+          </g>
+          <path d="M70 22 C84 8 96 10 96 24 C90 30 80 32 72 34 Z" fill="url(#gf-fin)"/>
+          <path d="M64 64 C74 80 88 80 90 68 C84 64 74 62 70 58 Z" fill="url(#gf-fin)"/>
+          <ellipse cx="58" cy="45" rx="50" ry="32" fill="url(#gf-body)"/>
+          <ellipse cx="40" cy="34" rx="22" ry="12" fill="#fff" opacity=".35"/>
+          <circle cx="26" cy="42" r="7.5" fill="#fff"/>
+          <circle cx="24" cy="43" r="4" fill="#16323b"/>
+          <circle cx="22.5" cy="41.5" r="1.4" fill="#fff"/>
+          <path d="M70 40 q14 5 0 10" fill="none" stroke="#e85d18" stroke-width="2.5" stroke-linecap="round" opacity=".5"/>
+        </g>
+      </svg>
+    </div>
+    <div class="fish-lane l2">
+      <svg class="fish small" viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="animation-duration:34s; animation-delay:-12s">
+        <g class="body-bob">
+          <g class="tail">
+            <path d="M104 45 C132 18 150 14 156 22 C146 34 150 40 156 45 C150 50 146 56 156 68 C150 76 132 72 104 45 Z" fill="url(#gf-fin)"/>
+          </g>
+          <path d="M70 22 C84 8 96 10 96 24 C90 30 80 32 72 34 Z" fill="url(#gf-fin)"/>
+          <ellipse cx="58" cy="45" rx="50" ry="32" fill="url(#gf-body)"/>
+          <ellipse cx="40" cy="34" rx="22" ry="12" fill="#fff" opacity=".35"/>
+          <circle cx="26" cy="42" r="7.5" fill="#fff"/>
+          <circle cx="24" cy="43" r="4" fill="#16323b"/>
+        </g>
+      </svg>
+    </div>
+    <div class="fish-lane l1">
+      <svg class="fish" viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="animation-duration:26s; animation-delay:-6s; top:140px">
+        <g class="body-bob">
+          <g class="tail">
+            <path d="M104 45 C132 18 150 14 156 22 C146 34 150 40 156 45 C150 50 146 56 156 68 C150 76 132 72 104 45 Z" fill="url(#gf-fin)"/>
+          </g>
+          <path d="M70 22 C84 8 96 10 96 24 C90 30 80 32 72 34 Z" fill="url(#gf-fin)"/>
+          <path d="M64 64 C74 80 88 80 90 68 C84 64 74 62 70 58 Z" fill="url(#gf-fin)"/>
+          <ellipse cx="58" cy="45" rx="50" ry="32" fill="url(#gf-body)"/>
+          <ellipse cx="40" cy="34" rx="22" ry="12" fill="#fff" opacity=".35"/>
+          <circle cx="26" cy="42" r="7.5" fill="#fff"/>
+          <circle cx="24" cy="43" r="4" fill="#16323b"/>
+          <circle cx="22.5" cy="41.5" r="1.4" fill="#fff"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- glossy green apple -->
+    <svg class="apple" viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="ap-body" cx="36%" cy="32%" r="72%">
+          <stop offset="0%" stop-color="#d6ff8e"/>
+          <stop offset="45%" stop-color="#8ddb4f"/>
+          <stop offset="100%" stop-color="#3f9e2f"/>
+        </radialGradient>
+        <linearGradient id="ap-leaf" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#a6e86a"/>
+          <stop offset="100%" stop-color="#3f9e3f"/>
+        </linearGradient>
+      </defs>
+      <path d="M60 30 C70 18 86 16 92 24" fill="none" stroke="#7a4a22" stroke-width="6" stroke-linecap="round"/>
+      <path d="M62 30 C76 12 104 14 104 36 C92 50 70 46 62 30 Z" fill="url(#ap-leaf)"/>
+      <path d="M66 32 C82 26 96 30 102 36" fill="none" stroke="#2f7d2f" stroke-width="2" opacity=".5" stroke-linecap="round"/>
+      <path d="M60 36
+               C40 30 16 40 16 70
+               C16 100 38 122 60 116
+               C82 122 104 100 104 70
+               C104 40 80 30 60 36 Z" fill="url(#ap-body)"/>
+      <ellipse cx="42" cy="58" rx="16" ry="22" fill="#fff" opacity=".4"/>
+      <circle cx="48" cy="48" r="5" fill="#fff" opacity=".8"/>
+      <!-- water droplet on the apple -->
+      <path d="M74 76 c0 -7 8 -11 8 -19 c0 8 8 12 8 19 a8 8 0 0 1 -16 0 Z" fill="rgba(220,245,255,.85)" stroke="rgba(255,255,255,.8)" stroke-width="1"/>
+      <circle cx="80" cy="77" r="2.4" fill="#fff"/>
+    </svg>
+
     <main>
-      <h1>jellifox</h1>
-      <p class="lead">个人项目入口。下面是基于《5E不全书》实时数据的 DND 5R 自动车卡工具。</p>
-      <div class="links">
-        <a class="btn" href="./dnd/"><span class="icon">🎲</span> DND 5R 自动车卡</a>
-      </div>
+      <section class="card">
+        <span class="dew"></span>
+        <h1>jellifox</h1>
+        <p class="lead">个人项目入口。下面是基于《5E不全书》实时数据的 DND 5R 自动车卡工具。</p>
+        <div class="links">
+          <a class="btn" href="./dnd/"><span class="icon">🎲</span> DND 5R 自动车卡</a>
+        </div>
+      </section>
     </main>
+
     <footer>
       <a href="https://github.com/jellifox" target="_blank" rel="noopener">github.com/jellifox</a>
     </footer>
