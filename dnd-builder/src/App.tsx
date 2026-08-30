@@ -4,7 +4,6 @@ import {
   loadBackgroundEntity, loadCachedIndex, loadClassEntity, loadIndex,
   loadSpeciesEntity, loadSpellListEntity, loadSubclassEntity, type BookData,
 } from './data/loader'
-import { spellListForClass } from './data/toc'
 import { buildStatblock } from './rules/build'
 import {
   AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SpellPanel,
@@ -33,6 +32,7 @@ const DEFAULT_CHOICES: CharacterChoices = {
   bgPlus2: null,
   bgPlus1: null,
   speciesPicks: [],
+  traitOptions: {},
   abilityMethod: 'array',
   hpMethod: 'average',
   hpRolls: [],
@@ -199,12 +199,13 @@ export default function App() {
   useEffect(() => {
     if (!book || !choices.classUrl) return trackEntity('spellList', '', null)
     const entry = book.index.classes.find(c => c.url === choices.classUrl)
-    const sl = entry ? spellListForClass(book.index, entry.title) : null
-    if (!sl) return trackEntity('spellList', '', null)
+    // 法术速查现为若干「万法大全」总表，全部载入后按职业筛选
+    const urls = book.index.spellLists.map(s => s.url)
+    if (!entry || urls.length === 0) return trackEntity('spellList', '', null)
     return trackEntity(
       'spellList',
-      sl.url,
-      loadSpellListEntity(book.meta, sl.url, entry!.title)
+      urls.join(','),
+      loadSpellListEntity(book.meta, urls, entry.title)
     )
   }, [book, choices.classUrl])
 

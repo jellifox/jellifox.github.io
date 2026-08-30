@@ -233,22 +233,13 @@ export function parseBookIndex(wcpText: string): BookIndex {
   const spellRootI = entries.findIndex(e => e.title === '法术速查' && e.level === 1)
   if (spellRootI >= 0) {
     for (const e of subtree(entries, spellRootI)) {
-      if (e.url && /法术速查\.html?$/.test(e.url)) {
+      // 仓库早期是「每职业一页」（XX法术速查.html），现为 速查/法术速查/ 下的总表，
+      // 故按目录匹配，两种结构都能识别。
+      if (e.url && /(^|\/)速查\/法术速查\/|法术速查\.html?$/.test(e.url)) {
         idx.spellLists.push({ title: e.title, url: e.url, source: '' })
       }
     }
   }
 
   return idx
-}
-
-/** 为某职业找到对应的法术速查页（按职业名前缀匹配，如 奇械师 -> 奇械师法术速查.html） */
-export function spellListForClass(index: BookIndex, classTitle: string): IndexEntry | null {
-  const name = classTitle.replace(/[（(].*$/, '').trim()
-  return (
-    index.spellLists.find(s => {
-      const file = s.url.split('/').pop() ?? ''
-      return file.startsWith(name) || s.title.startsWith(name)
-    }) ?? null
-  )
 }

@@ -198,17 +198,23 @@ export interface RepoMeta {
   fetchedAt: string
 }
 
-/** 法术速查页中的一个法术条目 */
+/** 万法大全速查表中的一个法术条目 */
 export interface SpellEntry {
   ring: number // 0 = 戏法
   school: string
   name: string // 中文名+英文名
-  source: string // 来源书（链接第一段路径）
+  source: string // 来源书缩写（PHB24 / XGE / TCE …）
+  classes: string[] // 可用职业（中文全名，由速查表的单字缩写还原）
+  castingTime: string
+  components: string // 如 "V/S/M"
+  ritual: boolean
+  concentration: boolean
 }
 
 export interface SpellList {
   classTitle: string
-  spells: SpellEntry[]
+  spells: SpellEntry[] // 该职业可选的法术
+  all: SpellEntry[] // 未按职业过滤的全表（种族/专长赋予的法术不受职业列表限制）
 }
 
 /** 专长速查中的一页（一页含多个专长） */
@@ -247,6 +253,7 @@ export interface CharacterChoices {
   bgPlus2: AbilityKey | null // 2+1 模式下 +2 的属性
   bgPlus1: AbilityKey | null // 2+1 模式下 +1 的属性
   speciesPicks: (AbilityKey | null)[] // 种族「自选加值」各槽位指向的属性（2014/第三方种族）
+  traitOptions: Record<string, string> // 选项式特质（精灵血系、邪魔遗赠…）-> 所选行名
   abilityMethod: AbilityMethod
   hpMethod: HpMethod
   hpRolls: number[] // 逐级投骰结果，索引 0 对应 2 级（1 级固定取生命骰最大值）

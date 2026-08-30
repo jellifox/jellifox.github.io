@@ -716,6 +716,11 @@ export interface ParsedSpellEntry {
   school: string
   name: string
   source: string
+  classes: string[]
+  castingTime: string
+  components: string
+  ritual: boolean
+  concentration: boolean
 }
 
 const RING_TITLES: Record<string, number> = {
@@ -723,32 +728,47 @@ const RING_TITLES: Record<string, number> = {
   五环: 5, 六环: 6, 七环: 7, 八环: 8, 九环: 9,
 }
 
-/** 解析 速查/法术速查/某职业法术速查.html：h2 分环阶，<a> 为法术条目 */
+/** 万法大全速查表的职业列用单字缩写 */
+const SPELL_CLASS_CN: Record<string, string> = {
+  诗: '吟游诗人', 牧: '牧师', 德: '德鲁伊', 帕: '圣武士', 软: '游侠',
+  术: '术士', 锁: '魔契师', 法: '法师', 械: '奇械师',
+}
+
+/**
+ * 解析 速查/法术速查/*.html（万法大全速查表）。
+ * 该页是一张总表，列为：法术名 环阶 学派 职业 时间 言语 姿势 材料 仪式 专注 来源。
+ * 仓库早期是「每职业一页」的结构，现已改为总表，故按列解析并保留职业信息供筛选。
+ */
 export function parseSpellList(html: string): ParsedSpellEntry[] {
   const doc = parseDoc(html)
   const out: ParsedSpellEntry[] = []
-  let ring = -1
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
-  let node: Node | null = walker.currentNode
-  while ((node = walker.nextNode())) {
-    const el = node as Element
-    const tag = el.tagName.toLowerCase()
-    if (/^h[1-4]$/.test(tag)) {
-      const t = (el.textContent ?? '').replace(/\s/g, '')
-      ring = RING_TITLES[t] ?? -1
-    } else if (tag === 'a' && ring >= 0) {
-      const raw = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
-      if (!raw) continue
-      const href = el.getAttribute('href') ?? ''
-      const source = href.split('/')[0] || ''
-      const m = raw.match(/^(\S+)\s*-\s*(.+)$/)
-      out.push({
-        ring,
-        school: m ? m[1] : '',
-        name: (m ? m[2] : raw).trim(),
-        source,
-      })
-    }
+  const yes = (v: string) => !!v && !/^[×xX✗－-]$/.test(v.trim())
+
+  for (const tr of Array.from(doc.querySelectorAll('tr'))) {
+    const td = Array.from(tr.querySelectorAll('td, th'))
+      .map(c => (c.textContent ?? '').replace(/\s+/g, ' ').trim())
+    if (td.length < 11) continue
+    const ring = RING_TITLES[td[1].replace(/\s/g, '')]
+    if (ring == null) continue // 表头或异常行
+
+    const components = ['言语', '姿势', '材料']
+      .map((_, i) => (yes(td[5 + i]) ? td[5 + i] : ''))
+      .filter(Boolean)
+      .join('/')
+
+    out.push({
+      ring,
+      school: td[2],
+      name: td[0],
+      source: td[10],
+      classes: td[3].split(/\s+/).filter(Boolean)
+        .map(t => SPELL_CLASS_CN[t]).filter((x): x is string => !!x),
+      castingTime: td[4],
+      components,
+      ritual: yes(td[8]),
+      concentration: yes(td[9]),
+    })
   }
   return out
 }
+

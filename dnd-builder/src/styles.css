@@ -661,3 +661,14 @@ textarea:focus {
   color: var(--gold);
   margin-right: 4px;
 }
+
+.chip.granted {
+  border-color: var(--gold);
+  color: var(--gold);
+  cursor: default;
+}
+
+.chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

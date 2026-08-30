@@ -16,6 +16,9 @@ import {
   deriveAbilities, deriveHp, effectiveBgChoice, effectiveSubrace, featSlots,
   speciesAbilityBonus, speciesTraits, type FeatSlot,
 } from '../rules/build'
+import {
+  effectiveTraitOption, grantedSpells, traitTables,
+} from '../rules/spells'
 
 interface PanelProps {
   book: BookData
@@ -380,6 +383,23 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
               </select>
             </label>
           )}
+          {traitTables(speciesTraits(species, effectiveSubrace(species, choices.subraceChoice))).map(tb => (
+            <label key={tb.traitName}>
+              {tb.traitName}（选定后按等级获得对应法术/增益）
+              <select
+                value={effectiveTraitOption(tb, choices.traitOptions[tb.traitName])}
+                onChange={e =>
+                  update(prev => ({
+                    traitOptions: { ...prev.traitOptions, [tb.traitName]: e.target.value },
+                  }))
+                }
+              >
+                {tb.rows.map(r => (
+                  <option key={r.name} value={r.name}>{r.name}</option>
+                ))}
+              </select>
+            </label>
+          ))}
           <details className="traits">
             <summary>
               种族特质（{speciesTraits(species, effectiveSubrace(species, choices.subraceChoice)).length} 项，自动写入角色卡）
@@ -1163,6 +1183,8 @@ export function SpellPanel({
   const cls = loaded.cls
   const spellList = loaded.spellList
   const row = cls?.levels.find(r => r.level === choices.level)
+  // 特性赋予的法术（种族/子职/专长），不占名额
+  const granted = useMemo(() => grantedSpells(choices, loaded), [choices, loaded])
   const hasSlots = !!row && (!!row.slots || (row.pactSlots?.count ?? 0) > 0)
 
   const byRing = useMemo(() => {
@@ -1181,7 +1203,9 @@ export function SpellPanel({
     return groups
   }, [spellList, filter])
 
-  if (!cls || (!hasSlots && !spellList)) return null
+  // 空法术表视同没有（非施法职业在总表里没有条目）
+  const hasSpells = (spellList?.spells.length ?? 0) > 0
+  if (!cls || (!hasSlots && !hasSpells && granted.length === 0)) return null
 
   const slotChips: string[] = []
   if (row?.slots) {
@@ -1191,26 +1215,64 @@ export function SpellPanel({
     slotChips.push(`魔契法术位 ${row.pactSlots.level}环 ×${row.pactSlots.count}（短休回复）`)
   }
 
+  // 名额：戏法与准备法术分开计数，取自职业等级表；已满时禁止再选（取消始终允许）
+  const isCantrip = (name: string) => spellList?.spells.find(s => s.name === name)?.ring === 0
+  const chosenCantrips = choices.spells.filter(isCantrip).length
+  const chosenLeveled = choices.spells.length - chosenCantrips
+  const maxCantrips = row?.cantrips ?? null
+  const maxPrepared = row?.preparedSpells ?? null
+  const grantedNames = new Set(granted.map(g => g.name))
+
+  function quotaFull(name: string): boolean {
+    if (isCantrip(name)) return maxCantrips != null && chosenCantrips >= maxCantrips
+    return maxPrepared != null && chosenLeveled >= maxPrepared
+  }
+
   function toggleSpell(name: string) {
-    update(prev => ({
-      spells: prev.spells.includes(name)
-        ? prev.spells.filter(s => s !== name)
-        : [...prev.spells, name],
-    }))
+    update(prev => {
+      if (prev.spells.includes(name)) return { spells: prev.spells.filter(s => s !== name) }
+      if (quotaFull(name)) return {}
+      return { spells: [...prev.spells, name] }
+    })
   }
 
   return (
     <Section step="五" title="法术" hint="法术列表来自速查，覆盖全部扩展书">
       <div className="kv-grid">
         {slotChips.length > 0 && (<><span>法术位</span><b>{slotChips.join('，')}</b></>)}
-        {row?.cantrips != null && (<><span>戏法数</span><b>{row.cantrips}</b></>)}
-        {row?.preparedSpells != null && (<><span>准备法术数</span><b>{row.preparedSpells}</b></>)}
+        {row?.cantrips != null && (
+          <><span>戏法</span><b className={chosenCantrips > row.cantrips ? 'warn' : ''}>
+            已选 {chosenCantrips} / {row.cantrips}
+          </b></>
+        )}
+        {row?.preparedSpells != null && (
+          <><span>准备法术</span><b className={chosenLeveled > row.preparedSpells ? 'warn' : ''}>
+            已选 {chosenLeveled} / {row.preparedSpells}
+          </b></>
+        )}
         {cls.spellAbility && (<><span>施法属性</span><b>{ABILITY_CN[cls.spellAbility]}</b></>)}
         {choices.spells.length > 0 && (<><span>已选法术</span><b>{choices.spells.length} 个</b></>)}
       </div>
 
       <EntityStatus flag={flags.spellList} />
-      {spellList && (
+
+      {granted.length > 0 && (
+        <>
+          <div className="field-label">
+            特性赋予的法术（{granted.length} 个，自动获得，不占名额）
+          </div>
+          <div className="chip-row">
+            {granted.map(g => (
+              <span key={g.name} className="chip small granted" title={`${g.source} · ${g.level}级获得`}>
+                {g.name}
+                <span className="tag">{g.level}级</span>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      {hasSpells && spellList && (
         <>
           <label>
             搜索法术（共 {spellList.spells.length} 个）
@@ -1233,8 +1295,15 @@ export function SpellPanel({
                   {g.spells.map(s => (
                     <button
                       key={s.name + s.source}
-                      className={`chip small ${choices.spells.includes(s.name) ? 'active' : ''}`}
-                      title={`${s.school}${s.source ? ` · ${s.source}` : ''}`}
+                      className={`chip small ${choices.spells.includes(s.name) ? 'active' : ''} ${
+                        grantedNames.has(s.name) ? 'granted' : ''
+                      }`}
+                      disabled={!choices.spells.includes(s.name) && quotaFull(s.name)}
+                      title={
+                        grantedNames.has(s.name)
+                          ? `${s.school} · 已由特性赋予，无需占用名额`
+                          : `${s.school}${s.source ? ` · ${s.source}` : ''}`
+                      }
                       onClick={() => toggleSpell(s.name)}
                     >
                       {s.name}

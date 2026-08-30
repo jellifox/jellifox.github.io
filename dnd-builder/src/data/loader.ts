@@ -125,14 +125,35 @@ export function loadFeatPageEntity(meta: RepoMeta, url: string, title: string): 
   })
 }
 
-export function loadSpellListEntity(
+/**
+ * 法术总表：把「5E万法大全 + 合作方万法大全」合并，并按职业筛选。
+ * 仓库已从「每职业一页」改为总表结构，因此这里合并多页再按职业列过滤。
+ */
+export async function loadSpellListEntity(
   meta: RepoMeta,
-  url: string,
+  urls: string[],
   classTitle: string
 ): Promise<SpellList> {
-  return loadEntity(meta, 'spelllist', url, html => {
-    const spells = parseSpellList(html)
-    if (spells.length === 0) return null
-    return { classTitle, spells } satisfies SpellList
-  })
+  const pages = await Promise.all(
+    urls.map(u =>
+      loadEntity(meta, 'spelllist', u, html => {
+        const spells = parseSpellList(html)
+        return spells.length > 0 ? { classTitle: '', spells, all: spells } : null
+      }).catch(() => null)
+    )
+  )
+  const all = pages.flatMap(p => p?.spells ?? [])
+  // 职业名可能带书名后缀（如「法师」「奇械师EFA」），取速查表职业名作为包含判据
+  const name = classTitle.replace(/[（(].*$/, '').trim()
+  const mine = all.filter(s => s.classes.some(c => name.includes(c) || c.includes(name)))
+  // 该职业在总表中无条目（非施法职业或名称对不上）时返回全表，交由界面自行取舍
+  const spells = mine.length > 0 ? mine : []
+  // 同名法术可能在两份总表里重复，按名称去重
+  const seen = new Set<string>()
+  const allSeen = new Set<string>()
+  return {
+    classTitle,
+    spells: spells.filter(s => (seen.has(s.name) ? false : (seen.add(s.name), true))),
+    all: all.filter(s => (allSeen.has(s.name) ? false : (allSeen.add(s.name), true))),
+  }
 }

@@ -11,6 +11,7 @@ import { SKILL_ABILITY, cnToSkill } from '../data/mappings'
 import {
   deriveAbilities, deriveHp, effectiveSubrace, featSlots, gainedFeatures, speciesTraits,
 } from './build'
+import { grantedSpells } from './spells'
 import {
   ARMORS, WEAPONS, abilityMod, armorClassValue, fmtMod,
   proficiencyBonus, weaponAttackAbility,
@@ -204,17 +205,39 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
     if (spellSlots[key]) spellSlots[key].total += row.pactSlots.count
   }
 
-  const spellItems = [...c.spells, ...c.spellsText.split('\n').map(s => s.trim()).filter(Boolean)]
+  // 从法术速查回查环阶与学派——否则导出的法术在面团里全部变成 0 环、无学派
+  // 用未过滤的全表查元数据：特性赋予的法术常不在本职业列表内（如森林侏儒的动物交谈）
+  const byName = new Map(
+    (loaded.spellList?.all ?? loaded.spellList?.spells ?? []).map(s => [s.name, s])
+  )
+  // 特性赋予的法术一并导出，并在备注里标明来源
+  const grants = grantedSpells(c, loaded)
+  const spellItems = [
+    ...c.spells.map(name => ({ name, entry: byName.get(name), note: '' })),
+    ...grants
+      .filter(g => !c.spells.includes(g.name))
+      .map(g => ({ name: g.name, entry: byName.get(g.name), note: g.source })),
+    // 手动补充的法术查不到元数据，按 0 环导出，由使用者在面团里改
+    ...c.spellsText.split('\n').map(s => s.trim()).filter(Boolean)
+      .map(name => ({ name, entry: undefined, note: '' })),
+  ]
   const spells = {
     mode: spellItems.length > 0 ? 'structured' : 'free',
     freeText: '',
     freeTextFontSize: 9,
-    structuredList: spellItems.map(name => ({
+    structuredList: spellItems.map(({ name, entry, note }) => ({
       id: nextId(),
-      level: 0, prepared: false, name, school: '',
-      castingTime: '', range: '', components: '', duration: '',
-      concentration: false, ritual: false, material: false,
-      note: '', description: '', higherLevel: '',
+      level: entry?.ring ?? 0,
+      prepared: false,
+      name,
+      school: entry?.school ?? '',
+      castingTime: entry?.castingTime ?? '', range: '',
+      components: entry?.components ?? '', duration: '',
+      concentration: entry?.concentration ?? false,
+      ritual: entry?.ritual ?? false,
+      material: (entry?.components ?? '').includes('M'),
+      note: note || (entry?.source ? `来源：${entry.source}` : ''),
+      description: '', higherLevel: '',
       fromDatabase: false, databaseId: null,
     })),
   }
