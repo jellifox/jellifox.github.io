@@ -1,3 +1,7 @@
 node_modules/
 .DS_Store
 .netlify/
+
+# Vite 构建缓存与临时文件（构建产物本身在 dnd/，需要提交）
+dnd-builder/dist/
+dnd-builder/vite.config.ts.timestamp-*.mjs
