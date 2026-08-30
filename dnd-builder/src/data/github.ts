@@ -63,7 +63,7 @@ export async function fetchWcp(ref: string): Promise<string> {
 
 // ---------- 按 SHA 失效的 localStorage 缓存 ----------
 
-export const PARSER_VERSION = 12
+export const PARSER_VERSION = 13
 const PREFIX = 'dnd5r-builder'
 
 function cacheKey(kind: string): string {

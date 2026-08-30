@@ -41,6 +41,34 @@ export function averageHp(hitDie: number, level: number, conMod: number): number
   return Math.max(level, hp)
 }
 
+/** 每级升级取的固定平均值（2024 规则：⌈(骰面+1)/2⌉） */
+export function hpPerLevelAverage(hitDie: number): number {
+  return Math.ceil((hitDie + 1) / 2)
+}
+
+export function rollDie(sides: number): number {
+  return 1 + Math.floor(Math.random() * sides)
+}
+
+/**
+ * 按逐级投骰结果计算生命值上限：1 级固定取骰面最大值，
+ * 2 级起用 rolls[i]（缺失的级数回退为该级平均值），每级都加体质调整值。
+ * 生命值上限至少为角色等级（体质为负时兜底）。
+ */
+export function rolledHp(
+  hitDie: number,
+  level: number,
+  conMod: number,
+  rolls: number[]
+): number {
+  let hp = hitDie + conMod
+  for (let lv = 2; lv <= level; lv++) {
+    const r = rolls[lv - 2] ?? hpPerLevelAverage(hitDie)
+    hp += r + conMod
+  }
+  return Math.max(level, hp)
+}
+
 // ---------- 护甲（2024 玩家手册装备表，属规则常量） ----------
 
 export interface ArmorDef {

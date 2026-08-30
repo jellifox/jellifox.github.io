@@ -4,7 +4,7 @@
 
 import type {
   AbilityKey, Action, BackgroundData, CharacterChoices, ClassData, E5Statblock,
-  LoadedEntities, RepoMeta, SkillKey, Skills, SpellSlots,
+  LoadedEntities, RepoMeta, SkillKey, Skills, SpeciesData, SpellSlots, TraitEntry,
 } from '../types'
 import {
   ABILITY_CN, ABILITY_FULL_EN, ABILITY_KEYS, SKILL_ABILITY, SIZE_CN_TO_EN,
@@ -13,7 +13,7 @@ import {
 import { subclassFeatureLevel } from '../data/parsers'
 import {
   ARMORS, WEAPONS, abilityMod, armorClassValue, averageHp, fmtMod,
-  proficiencyBonus, weaponAttackAbility,
+  proficiencyBonus, rolledHp, weaponAttackAbility,
 } from './rules'
 
 export interface DerivedAbilities {
@@ -39,6 +39,65 @@ export function effectiveBgChoice(
       ? c.bgPlus1
       : bg.abilities.find(k => k !== plus2) ?? null
   return { plus2, plus1 }
+}
+
+/**
+ * 种族的实际生效特质 = 共通特质 + 所选亚种的特质。
+ * 谦卑林等扩展把「共通特质 + 若干亚种」放在同一页（如鸦族下的昏鸦族/煽鸦族），
+ * 只取共通特质会漏掉亚种加成，因此所有消费方都应经由本函数取用。
+ */
+export function speciesTraits(
+  species: SpeciesData | null | undefined,
+  subraceChoice: string
+): TraitEntry[] {
+  if (!species) return []
+  // 经 effectiveSubrace 解析：未选择时按界面显示的默认（第一个）生效，
+  // 避免「界面显示已选中某亚种、角色卡却没算它的特质」。
+  const name = effectiveSubrace(species, subraceChoice)
+  const sub = (species.subraces ?? []).find(s => s.name === name)
+  return sub ? [...species.traits, ...sub.traits] : species.traits
+}
+
+/** 亚种未选或已失效时回退到第一个（保证有亚种的种族总有确定结果） */
+export function effectiveSubrace(species: SpeciesData | null | undefined, choice: string): string {
+  const subs = species?.subraces ?? []
+  if (subs.length === 0) return ''
+  return subs.some(s => s.name === choice) ? choice : subs[0].name
+}
+
+/**
+ * 生命值上限的唯一计算入口（角色卡预览、面团导出、属性面板都经由此处，避免各算各的）。
+ * 顺序：按方式取基础值 -> 加种族/专长的每级加成（矮人刚毅、强健身心等）。
+ * 手动模式直接采用用户填写的数值，不再叠加任何加成。
+ */
+export function deriveHp(
+  c: CharacterChoices,
+  cls: ClassData | null | undefined,
+  spTraits: TraitEntry[],
+  conMod: number
+): { max: number; hitDie: number; bonusPerLevel: number; source: string } {
+  const hitDie = cls?.hitDie ?? 8
+  const level = c.level
+
+  // 每级额外生命值：矮人刚毅（生命值上限加1/级）、强健身心 Tough（+2/级）
+  let bonusPerLevel = 0
+  if (spTraits.some(t => /生命值上限加1/.test(t.desc))) bonusPerLevel += 1
+  const tough = Object.values(c.feats).some(f => /强健身心|Tough/i.test(f.name))
+  if (tough) bonusPerLevel += 2
+
+  if (c.hpMethod === 'manual' && c.hpManual != null) {
+    return { max: Math.max(1, c.hpManual), hitDie, bonusPerLevel, source: '手动指定' }
+  }
+  const base =
+    c.hpMethod === 'roll'
+      ? rolledHp(hitDie, level, conMod, c.hpRolls)
+      : averageHp(hitDie, level, conMod)
+  return {
+    max: base + bonusPerLevel * level,
+    hitDie,
+    bonusPerLevel,
+    source: c.hpMethod === 'roll' ? '逐级投骰' : '固定平均值',
+  }
 }
 
 // ---------- 专长槽位（按 5R 升级规则从职业等级表推导） ----------
@@ -139,12 +198,13 @@ export function buildStatblock(
   const ab = deriveAbilities(c, loaded.background)
   const pb = proficiencyBonus(c.level)
   const level = c.level
+  // 共通特质 + 所选亚种特质
+  const spTraits = speciesTraits(species, c.subraceChoice)
 
   // ---- 生命值 / 护甲 ----
-  const hitDie = cls?.hitDie ?? 8
-  let hp = averageHp(hitDie, level, ab.mods.CON)
-  // 矮人刚毅等「生命值上限 +1/级」特质自动加成
-  if (species?.traits.some(t => /生命值上限加1/.test(t.desc))) hp += level
+  const hpInfo = deriveHp(c, cls, spTraits, ab.mods.CON)
+  const hitDie = hpInfo.hitDie
+  const hp = hpInfo.max
 
   const armor = ARMORS.find(a => a.id === c.armorId) ?? ARMORS[0]
   const acValue = armorClassValue(armor, ab.mods.DEX, c.shield)
@@ -161,7 +221,7 @@ export function buildStatblock(
 
   const profSkills = new Set<SkillKey>([...(bg?.skills ?? []), ...c.classSkills])
   // 种族特质授予的技能熟练（如兔人的“小兔感官：你拥有察觉技能的熟练”）
-  for (const t of species?.traits ?? []) {
+  for (const t of spTraits) {
     const m = t.desc.match(/拥有(?:对)?([^\n。，]{1,6})技能的熟练|获得([^\n。，]{1,6})技能熟练/)
     if (m) {
       const sk = cnToSkill((m[1] ?? m[2]).trim())
@@ -176,7 +236,7 @@ export function buildStatblock(
 
   // ---- 感官（从种族特质中提取黑暗视觉等） ----
   const senses: string[] = []
-  for (const t of species?.traits ?? []) {
+  for (const t of spTraits) {
     const m = (t.name + t.desc).match(/(\d+)\s*尺.{0,4}黑暗视觉|黑暗视觉.{0,8}?(\d+)\s*尺/)
     if (/黑暗视觉/.test(t.name) && m) {
       senses.push(`黑暗视觉 ${m[1] ?? m[2]}尺`)
@@ -186,7 +246,7 @@ export function buildStatblock(
 
   // ---- 特殊能力：种族特质 + 背景专长 + 职业特性 + 子职特性 ----
   const specials: Action[] = []
-  for (const t of species?.traits ?? []) {
+  for (const t of spTraits) {
     specials.push({ name: `【种族】${t.name}`, desc: t.desc })
   }
   if (bg?.feat) {

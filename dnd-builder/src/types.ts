@@ -115,6 +115,13 @@ export interface TraitEntry {
   desc: string
 }
 
+/** 亚种：与种族共通特质并存的一组附加特质（如谦卑林鸦族下的昏鸦族/煽鸦族） */
+export interface SubraceEntry {
+  name: string
+  desc: string
+  traits: TraitEntry[]
+}
+
 export interface SpeciesData {
   id: string
   nameCn: string
@@ -123,7 +130,8 @@ export interface SpeciesData {
   sizeOptions: string[] // ['中型'] 或 ['中型', '小型']
   sizeNote: string
   speed: number
-  traits: TraitEntry[]
+  traits: TraitEntry[] // 共通特质
+  subraces: SubraceEntry[] // 可选亚种，空数组表示该种族无亚种
   desc: string
 }
 
@@ -218,6 +226,9 @@ export interface LoadedEntities {
 
 export type AbilityMethod = 'array' | 'pointbuy' | 'roll' | 'custom'
 
+/** 生命值取值方式：固定平均值 / 逐级投骰 / 手动指定 */
+export type HpMethod = 'average' | 'roll' | 'manual'
+
 export interface CharacterChoices {
   name: string
   alignment: string
@@ -225,12 +236,16 @@ export interface CharacterChoices {
   classUrl: string // 仓库内页面路径，即 TOC 索引中的 url
   subclassUrl: string
   speciesUrl: string
+  subraceChoice: string // 亚种名称（种族无亚种时为空）
   sizeChoice: string
   backgroundUrl: string
   bgBonusMode: '2+1' | '1+1+1'
   bgPlus2: AbilityKey | null // 2+1 模式下 +2 的属性
   bgPlus1: AbilityKey | null // 2+1 模式下 +1 的属性
   abilityMethod: AbilityMethod
+  hpMethod: HpMethod
+  hpRolls: number[] // 逐级投骰结果，索引 0 对应 2 级（1 级固定取生命骰最大值）
+  hpManual: number | null // 手动指定的生命值上限
   baseScores: Record<AbilityKey, number | null>
   rolledSets: number[][] // 投骰生成的 5 组候选数组
   rollSetIndex: number // 当前选用的组索引（-1 表示未选）

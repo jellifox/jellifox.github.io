@@ -10,9 +10,12 @@ import {
 } from '../data/mappings'
 import {
   ARMORS, POINT_BUY_BUDGET, STANDARD_ARRAY, WEAPONS, abilityMod, fmtMod,
-  pointBuyCost, proficiencyBonus, roll4d6DropLowest,
+  hpPerLevelAverage, pointBuyCost, proficiencyBonus, roll4d6DropLowest, rollDie,
 } from '../rules/rules'
-import { deriveAbilities, effectiveBgChoice, featSlots, type FeatSlot } from '../rules/build'
+import {
+  deriveAbilities, deriveHp, effectiveBgChoice, effectiveSubrace, featSlots, speciesTraits,
+  type FeatSlot,
+} from '../rules/build'
 
 interface PanelProps {
   book: BookData
@@ -362,10 +365,28 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
               )}
             </b>
           </div>
+          {(species.subraces ?? []).length > 0 && (
+            <label>
+              亚种（{(species.subraces ?? []).length} 个可选，其特质叠加在共通特质之上）
+              <select
+                value={effectiveSubrace(species, choices.subraceChoice)}
+                onChange={e => update({ subraceChoice: e.target.value })}
+              >
+                {(species.subraces ?? []).map(s => (
+                  <option key={s.name} value={s.name}>
+                    {s.name}（{s.traits.length} 项特质）
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <details className="traits">
-            <summary>种族特质（{species.traits.length} 项，自动写入角色卡）</summary>
-            {species.traits.map(t => (
-              <p key={t.name}>
+            <summary>
+              种族特质（{speciesTraits(species, effectiveSubrace(species, choices.subraceChoice)).length} 项，自动写入角色卡）
+            </summary>
+            {speciesTraits(species, effectiveSubrace(species, choices.subraceChoice)).map((t, i) => (
+              // 共通特质与亚种特质可能重名（如各亚种都有「属性值加成」），需带序号去重
+              <p key={`${t.name}-${i}`}>
                 <b>{t.name}。</b>
                 {t.desc}
               </p>
@@ -764,7 +785,130 @@ export function AbilityPanel({
       <div className="meta">
         熟练加值：{fmtMod(proficiencyBonus(choices.level))}（{choices.level} 级）
       </div>
+
+      <HpBlock choices={choices} update={update} loaded={loaded} ab={ab} />
     </Section>
+  )
+}
+
+// ---------- 生命值 ----------
+
+function HpBlock({
+  choices, update, loaded, ab,
+}: Pick<PanelProps, 'choices' | 'update' | 'loaded'> & { ab: ReturnType<typeof deriveAbilities> }) {
+  const cls = loaded.cls
+  const spTraits = speciesTraits(loaded.species, effectiveSubrace(loaded.species, choices.subraceChoice))
+  const conMod = ab.mods.CON
+  const hp = deriveHp(choices, cls, spTraits, conMod)
+  const perLevelAvg = hpPerLevelAverage(hp.hitDie)
+
+  // 投骰模式下升级后补投新增等级（已投出的结果保持不变，不会因升级被重置）
+  const need = Math.max(0, choices.level - 1)
+  useEffect(() => {
+    if (choices.hpMethod !== 'roll' || choices.hpRolls.length >= need) return
+    update(prev => ({
+      hpRolls: [
+        ...prev.hpRolls,
+        ...Array.from({ length: need - prev.hpRolls.length }, () => rollDie(hp.hitDie)),
+      ],
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices.hpMethod, need, hp.hitDie])
+
+  /** 为 2..level 各投一次生命骰（保留已有结果，只补/重投全部） */
+  function rollAll() {
+    update({
+      hpMethod: 'roll',
+      hpRolls: Array.from({ length: Math.max(0, choices.level - 1) }, () => rollDie(hp.hitDie)),
+    })
+  }
+  function rerollOne(i: number) {
+    update(prev => {
+      const rolls = [...prev.hpRolls]
+      rolls[i] = rollDie(hp.hitDie)
+      return { hpRolls: rolls }
+    })
+  }
+
+  if (!cls) {
+    return <div className="meta">生命值：选择职业后按生命骰自动计算。</div>
+  }
+
+  return (
+    <div className="hp-block">
+      <div className="bonus-row">
+        <b className="hp-total">生命值上限 {hp.max}</b>
+        <label className="inline-radio">
+          <input
+            type="radio"
+            checked={choices.hpMethod === 'average'}
+            onChange={() => update({ hpMethod: 'average' })}
+          />
+          固定平均值
+        </label>
+        <label className="inline-radio">
+          <input
+            type="radio"
+            checked={choices.hpMethod === 'roll'}
+            onChange={() => (choices.hpRolls.length ? update({ hpMethod: 'roll' }) : rollAll())}
+          />
+          逐级投骰
+        </label>
+        <label className="inline-radio">
+          <input
+            type="radio"
+            checked={choices.hpMethod === 'manual'}
+            onChange={() => update({ hpMethod: 'manual', hpManual: choices.hpManual ?? hp.max })}
+          />
+          手动指定
+        </label>
+      </div>
+
+      <div className="meta">
+        1级取生命骰最大值 D{hp.hitDie} = {hp.hitDie}，之后每级
+        {choices.hpMethod === 'roll' ? ` 投 1d${hp.hitDie}` : ` 取平均 ${perLevelAvg}`}
+        ，每级再加体质调整值 {fmtMod(conMod)}
+        {hp.bonusPerLevel > 0 && `，另有每级 +${hp.bonusPerLevel}（种族/专长）`}
+        {choices.hpMethod === 'manual' && '（手动模式下不叠加任何加成）'}
+      </div>
+
+      {choices.hpMethod === 'roll' && (
+        <>
+          <div className="bonus-row">
+            <button className="btn small" onClick={rollAll}>🎲 全部重投</button>
+            <span className="meta">点单个骰值可单独重投</span>
+          </div>
+          {choices.level > 1 && (
+            <div className="chip-row">
+              {Array.from({ length: choices.level - 1 }, (_, i) => (
+                <button
+                  key={i}
+                  className="chip small"
+                  title={`${i + 2} 级，点击重投`}
+                  onClick={() => rerollOne(i)}
+                >
+                  {i + 2}级 {choices.hpRolls[i] ?? perLevelAvg}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {choices.hpMethod === 'manual' && (
+        <label>
+          生命值上限
+          <NumberField
+            className="score-input"
+            value={choices.hpManual}
+            min={1}
+            max={999}
+            emptyMeans="null"
+            onCommit={v => update({ hpManual: v })}
+          />
+        </label>
+      )}
+    </div>
   )
 }
 

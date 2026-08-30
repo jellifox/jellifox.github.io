@@ -8,9 +8,11 @@ import type {
   AbilityKey, CharacterChoices, LoadedEntities, SkillKey,
 } from '../types'
 import { SKILL_ABILITY, cnToSkill } from '../data/mappings'
-import { deriveAbilities, featSlots, gainedFeatures } from './build'
 import {
-  ARMORS, WEAPONS, abilityMod, armorClassValue, averageHp, fmtMod,
+  deriveAbilities, deriveHp, effectiveSubrace, featSlots, gainedFeatures, speciesTraits,
+} from './build'
+import {
+  ARMORS, WEAPONS, abilityMod, armorClassValue, fmtMod,
   proficiencyBonus, weaponAttackAbility,
 } from './rules'
 import { subclassFeatureLevel } from '../data/parsers'
@@ -84,17 +86,19 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
   const pb = proficiencyBonus(c.level)
   const level = c.level
 
-  // ---- 生命值 / 护甲（与角色卡预览同一套算法） ----
-  const hitDie = cls?.hitDie ?? 8
-  let hpMax = averageHp(hitDie, level, ab.mods.CON)
-  if (species?.traits.some(t => /生命值上限加1/.test(t.desc))) hpMax += level
+  // ---- 生命值 / 护甲（与角色卡预览共用 deriveHp / speciesTraits） ----
+  const subraceName = effectiveSubrace(species, c.subraceChoice)
+  const spTraits = speciesTraits(species, c.subraceChoice)
+  const hpInfo = deriveHp(c, cls, spTraits, ab.mods.CON)
+  const hitDie = hpInfo.hitDie
+  const hpMax = hpInfo.max
 
   const armor = ARMORS.find(a => a.id === c.armorId) ?? ARMORS[0]
   const acValue = armorClassValue(armor, ab.mods.DEX, c.shield)
 
   // ---- 熟练技能（背景 + 职业选择 + 种族特质授予） ----
   const profSkills = new Set<SkillKey>([...(bg?.skills ?? []), ...c.classSkills])
-  for (const t of species?.traits ?? []) {
+  for (const t of spTraits) {
     const m = t.desc.match(/拥有(?:对)?([^\n。，]{1,6})技能的熟练|获得([^\n。，]{1,6})技能熟练/)
     if (m) {
       const sk = cnToSkill((m[1] ?? m[2]).trim())
@@ -161,7 +165,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
   }
 
   // ---- 种族特质 ----
-  const raceItems = (species?.traits ?? []).map(t => ({ name: t.name, detail: t.desc }))
+  const raceItems = spTraits.map(t => ({ name: t.name, detail: t.desc }))
 
   // ---- 专长（起源 + 各升级槽位） ----
   const featItems: { name: string; level?: string; detail: string }[] = []
@@ -238,7 +242,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
       charName: c.name || '未命名角色',
       background: bg?.nameCn ?? '',
       charClass: cls ? `${cls.nameCn}${level ? ` ${level}级` : ''}` : '',
-      race: species?.nameCn ?? '',
+      race: species ? species.nameCn + (subraceName ? `（${subraceName}）` : '') : '',
       subclass: sub?.nameCn ?? '',
       level: String(level),
       exp: '',

@@ -647,3 +647,17 @@ textarea:focus {
   border-top: 1px dashed #b3a284;
   padding-top: 6px;
 }
+
+/* ---------- 生命值 ---------- */
+
+.hp-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.hp-total {
+  font-size: 15px;
+  color: var(--gold);
+  margin-right: 4px;
+}

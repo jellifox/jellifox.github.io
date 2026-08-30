@@ -3,7 +3,7 @@
 
 import type {
   AbilityKey, BackgroundData, ClassData, ClassLevelRow, SkillKey,
-  SpeciesData, SubclassData, TraitEntry,
+  SpeciesData, SubclassData, SubraceEntry, TraitEntry,
 } from '../types'
 import {
   cnTextToSkills, cnToAbilities, parseCnInt, CN_NUM,
@@ -118,6 +118,11 @@ function traitNameOf(head: string): string {
   return head.replace(/[。.．]\s*$/, '').replace(/\s+/g, ' ').trim()
 }
 
+/** 以句号结尾 = 单条特质的标题（而非区块/亚种小节标题） */
+function isHeadingLike(head: string): boolean {
+  return /[。．.]\s*$/.test(head)
+}
+
 // ---------- 种族 ----------
 
 /** 种族页里属于「元信息」而非特质的加粗标题（2024 键值式或 MPMM 正文式都可能出现） */
@@ -177,13 +182,32 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
   // 真正的特质是普通 <b>——此时门控必须关闭，否则第二条起的特质全被降级折叠。
   const gateByRed = Array.from(featureHeads).some(h => /[。．.]\s*$/.test(h))
 
+  // 亚种（Subrace）识别：
+  // 谦卑林等扩展把「共通特质 + 若干亚种」放在同一页，结构为
+  //   红标「XX特质 XX Traits」 -> 共通特质…  红标「昏鸦族 Dusk Corvum」 -> 亚种特质…
+  // 因此规则是：出现在「特质」区块标记之后的红标题即为一个亚种。
+  // 该标记之前的红标题是背景故事（如 PHB2024 精灵页的卓尔/高等精灵/木精灵），不算亚种。
   const traits: TraitEntry[] = []
+  const subraces: SubraceEntry[] = []
+  let sawTraitsMarker = false
+  let currentSub: SubraceEntry | null = null
+  const sink = () => (currentSub ? currentSub.traits : traits)
+
   let current: TraitEntry | null = null
   for (const seg of boldSegments(text)) {
     const headPlain = plain(seg.head).replace(/\s+/g, ' ').trim()
     const rawName = traitNameOf(seg.head)
     // 跳过区块标题（如 “矮人特质 Dwarf Traits””XX特质”），它不是单条特质
     if (/特质\s*[A-Za-z''\- ]*$|Traits?\s*$/.test(rawName)) {
+      if (featureHeads.has(headPlain) || featureHeads.has(rawName)) sawTraitsMarker = true
+      current = null
+      continue
+    }
+    // 特质区块之后的红标题 = 亚种起点
+    if (sawTraitsMarker && !isHeadingLike(headPlain) &&
+        (featureHeads.has(headPlain) || featureHeads.has(rawName))) {
+      currentSub = { name: rawName, desc: seg.body.trim(), traits: [] }
+      subraces.push(currentSub)
       current = null
       continue
     }
@@ -217,7 +241,7 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
     )
     if (isTopLevel) {
       current = { name: rawName, desc: seg.body }
-      traits.push(current)
+      sink().push(current)
     } else if (current) {
       const body = seg.body ?? ''
       if (isHeading) {
@@ -230,6 +254,9 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
     }
   }
   for (const t of traits) t.desc = t.desc.replace(/\n{2,}/g, '\n').trim()
+  for (const s of subraces) {
+    for (const t of s.traits) t.desc = t.desc.replace(/\n{2,}/g, '\n').trim()
+  }
 
   if (sizeOptions.length === 0) sizeOptions = ['中型']
   if (!speed) speed = 30
@@ -254,6 +281,7 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
     sizeNote: sizeText,
     speed,
     traits,
+    subraces,
     desc,
   }
 }
