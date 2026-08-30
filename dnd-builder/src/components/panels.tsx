@@ -43,6 +43,59 @@ function EntityStatus({ flag }: { flag: 'loading' | string | undefined }) {
   return <p className="meta warn">{flag}（可换一个选项，或点击顶部「强制刷新」）</p>
 }
 
+/**
+ * 数字输入框：输入过程中允许临时为空或越界，失焦（或按回车）时才夹取范围并提交。
+ * 若在 onChange 里直接夹取，删空的瞬间就会被填回最小值，导致无法清空重填。
+ *
+ * emptyMeans: 失焦时内容为空的处理方式
+ *   'revert' —— 恢复原值（等级这类必填项）
+ *   'null'   —— 提交 null（属性值这类「可留空」项）
+ */
+function NumberField({
+  value, min, max, onCommit, emptyMeans = 'revert', className, placeholder,
+}: {
+  value: number | null
+  min: number
+  max: number
+  onCommit: (v: number | null) => void
+  emptyMeans?: 'revert' | 'null'
+  className?: string
+  placeholder?: string
+}) {
+  // draft 为 null 表示「未在编辑」，直接显示外部值
+  const [draft, setDraft] = useState<string | null>(null)
+
+  function commit() {
+    if (draft === null) return
+    const t = draft.trim()
+    if (!t) {
+      if (emptyMeans === 'null') onCommit(null)
+      // 'revert' 时不提交，交回外部值显示
+    } else {
+      const n = parseInt(t, 10)
+      onCommit(Number.isNaN(n) ? (emptyMeans === 'null' ? null : value) : Math.max(min, Math.min(max, n)))
+    }
+    setDraft(null)
+  }
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      className={className}
+      placeholder={placeholder}
+      value={draft ?? (value ?? '').toString()}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') setDraft(null)
+      }}
+    />
+  )
+}
+
 // ---------- 基本信息 ----------
 
 export function BasicsPanel({
@@ -62,14 +115,11 @@ export function BasicsPanel({
         </label>
         <label>
           等级（1-20）
-          <input
-            type="number"
+          <NumberField
+            value={choices.level}
             min={1}
             max={20}
-            value={choices.level}
-            onChange={e =>
-              update({ level: Math.max(1, Math.min(20, parseInt(e.target.value || '1', 10))) })
-            }
+            onCommit={v => update({ level: v ?? choices.level })}
           />
         </label>
         <label>
@@ -654,18 +704,14 @@ export function AbilityPanel({
               <td>{ABILITY_CN[k]} {k}</td>
               <td>
                 {choices.abilityMethod === 'custom' ? (
-                  <input
-                    type="number"
+                  <NumberField
                     className="score-input"
+                    value={choices.baseScores[k]}
                     min={1}
                     max={30}
                     placeholder="10"
-                    value={choices.baseScores[k] ?? ''}
-                    onChange={e => {
-                      const raw = e.target.value
-                      if (!raw) return setScore(k, null)
-                      setScore(k, Math.max(1, Math.min(30, parseInt(raw, 10) || 1)))
-                    }}
+                    emptyMeans="null"
+                    onCommit={v => setScore(k, v)}
                   />
                 ) : choices.abilityMethod === 'pointbuy' ? (
                   <span className="stepper">
