@@ -120,6 +120,8 @@ export interface SubraceEntry {
   name: string
   desc: string
   traits: TraitEntry[]
+  /** 以「属性值提升/增加」形式给出的加值原文（该类段落不进特质列表，但加值仍需生效） */
+  abilityBonusText: string
 }
 
 export interface SpeciesData {
@@ -132,6 +134,8 @@ export interface SpeciesData {
   speed: number
   traits: TraitEntry[] // 共通特质
   subraces: SubraceEntry[] // 可选亚种，空数组表示该种族无亚种
+  /** 同 SubraceEntry.abilityBonusText，种族层级的加值原文 */
+  abilityBonusText: string
   desc: string
 }
 
@@ -242,6 +246,7 @@ export interface CharacterChoices {
   bgBonusMode: '2+1' | '1+1+1'
   bgPlus2: AbilityKey | null // 2+1 模式下 +2 的属性
   bgPlus1: AbilityKey | null // 2+1 模式下 +1 的属性
+  speciesPicks: (AbilityKey | null)[] // 种族「自选加值」各槽位指向的属性（2014/第三方种族）
   abilityMethod: AbilityMethod
   hpMethod: HpMethod
   hpRolls: number[] // 逐级投骰结果，索引 0 对应 2 级（1 级固定取生命骰最大值）

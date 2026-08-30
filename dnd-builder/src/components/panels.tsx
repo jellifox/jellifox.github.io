@@ -13,8 +13,8 @@ import {
   hpPerLevelAverage, pointBuyCost, proficiencyBonus, roll4d6DropLowest, rollDie,
 } from '../rules/rules'
 import {
-  deriveAbilities, deriveHp, effectiveBgChoice, effectiveSubrace, featSlots, speciesTraits,
-  type FeatSlot,
+  deriveAbilities, deriveHp, effectiveBgChoice, effectiveSubrace, featSlots,
+  speciesAbilityBonus, speciesTraits, type FeatSlot,
 } from '../rules/build'
 
 interface PanelProps {
@@ -520,7 +520,8 @@ export function AbilityPanel({
   update,
   loaded,
 }: Pick<PanelProps, 'choices' | 'update' | 'loaded'>) {
-  const ab = deriveAbilities(choices, loaded.background)
+  const ab = deriveAbilities(choices, loaded.background, loaded.species)
+  const spBonus = speciesAbilityBonus(loaded.species, choices.subraceChoice)
   const cls = loaded.cls
   const bg = loaded.background
 
@@ -709,12 +710,38 @@ export function AbilityPanel({
         </div>
       )}
 
+      {spBonus.flexible.length > 0 && (
+        <div className="bonus-row">
+          <span className="meta">种族自选加值：</span>
+          {spBonus.flexible.map((amt, i) => (
+            <label key={i} className="inline-radio">
+              +{amt} 给
+              <select
+                value={choices.speciesPicks[i] ?? ''}
+                onChange={e =>
+                  update(prev => {
+                    const picks = [...prev.speciesPicks]
+                    picks[i] = (e.target.value || null) as AbilityKey | null
+                    return { speciesPicks: picks }
+                  })
+                }
+              >
+                <option value="">— 未指定 —</option>
+                {ABILITY_KEYS.map(k => (
+                  <option key={k} value={k}>{ABILITY_CN[k]}</option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+
       <table className="ability-table">
         <thead>
           <tr>
             <th>属性</th>
             <th>基础值</th>
-            <th>背景加值</th>
+            <th>加值合计</th>
             <th>总值</th>
             <th>调整值</th>
           </tr>

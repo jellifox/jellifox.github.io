@@ -8,7 +8,7 @@ import type {
 } from '../types'
 import {
   ABILITY_CN, ABILITY_FULL_EN, ABILITY_KEYS, SKILL_ABILITY, SIZE_CN_TO_EN,
-  cnToSkill,
+  cnToSkill, mergeAbilityBonus, parseAbilityBonus, type AbilityBonusSpec,
 } from '../data/mappings'
 import { subclassFeatureLevel } from '../data/parsers'
 import {
@@ -145,12 +145,47 @@ export function featSlots(cls: ClassData | null, level: number): FeatSlot[] {
   return out
 }
 
-export function deriveAbilities(c: CharacterChoices, bg: BackgroundData | null): DerivedAbilities {
+/**
+ * 种族特质给出的属性加值（2014 与第三方种族仍由种族加值；2024 种族一般为空）。
+ * fixed 自动生效；flexible 是待用户指定的槽位，按 speciesPicks 逐位落到具体属性。
+ */
+export function speciesAbilityBonus(
+  species: SpeciesData | null | undefined,
+  subraceChoice: string
+): AbilityBonusSpec {
+  if (!species) return { fixed: {}, flexible: [] }
+  const name = effectiveSubrace(species, subraceChoice)
+  const sub = (species.subraces ?? []).find(s => s.name === name)
+  // 两处来源：作为特质出现的「属性值加成」，与被当作元信息的「属性值提升/增加」原文
+  const texts = [
+    ...speciesTraits(species, subraceChoice).map(t => t.desc),
+    species.abilityBonusText ?? '',
+    sub?.abilityBonusText ?? '',
+  ]
+  return mergeAbilityBonus(texts.map(parseAbilityBonus))
+}
+
+export function deriveAbilities(
+  c: CharacterChoices,
+  bg: BackgroundData | null,
+  species?: SpeciesData | null
+): DerivedAbilities {
   const base = Object.fromEntries(
     ABILITY_KEYS.map(k => [k, c.baseScores[k] ?? 10])
   ) as Record<AbilityKey, number>
 
   const bonus = Object.fromEntries(ABILITY_KEYS.map(k => [k, 0])) as Record<AbilityKey, number>
+
+  // 种族加值（2014/第三方种族）：固定项直接加，自选项按用户指定的槽位加
+  if (species) {
+    const sp = speciesAbilityBonus(species, c.subraceChoice)
+    for (const [k, v] of Object.entries(sp.fixed) as [AbilityKey, number][]) bonus[k] += v
+    sp.flexible.forEach((amt, i) => {
+      const k = c.speciesPicks[i]
+      if (k) bonus[k] += amt
+    })
+  }
+
   if (bg && bg.abilities.length > 0) {
     if (c.bgBonusMode === '1+1+1') {
       for (const k of bg.abilities) bonus[k] += 1
@@ -195,7 +230,7 @@ export function buildStatblock(
   const species = loaded.species ?? undefined
   const bg = loaded.background ?? undefined
 
-  const ab = deriveAbilities(c, loaded.background)
+  const ab = deriveAbilities(c, loaded.background, species)
   const pb = proficiencyBonus(c.level)
   const level = c.level
   // 共通特质 + 所选亚种特质

@@ -32,6 +32,7 @@ const DEFAULT_CHOICES: CharacterChoices = {
   bgBonusMode: '2+1',
   bgPlus2: null,
   bgPlus1: null,
+  speciesPicks: [],
   abilityMethod: 'array',
   hpMethod: 'average',
   hpRolls: [],

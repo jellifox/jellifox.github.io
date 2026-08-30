@@ -171,3 +171,69 @@ export function parseCnInt(s: string): number | null {
   }
   return null
 }
+
+// ---------- 种族特质中的属性加值 ----------
+
+/**
+ * 从种族特质文本里解析属性加值。
+ * 2024 规则的加值来自背景，但 2014 与第三方（谦卑林、拉尼卡等）种族仍由种族给加值。
+ *
+ * 固定加值："你的智力增加2点。" / "你的体质加2，你的感知加1" / "你的感知+1"
+ * 自选加值："选择一项属性提升2，并选择另一项属性提升1" / "三项不同的属性各自加1"
+ *   -> flexible 记录每个待分配槽位的加值点数（如 [2,1] 或 [1,1,1]）。
+ */
+export interface AbilityBonusSpec {
+  fixed: Partial<Record<AbilityKey, number>>
+  flexible: number[]
+}
+
+const CN_SMALL: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
+
+export function parseAbilityBonus(text: string): AbilityBonusSpec {
+  const spec: AbilityBonusSpec = { fixed: {}, flexible: [] }
+  if (!text) return spec
+  const t = text.replace(/\s+/g, '')
+
+  // 固定：<属性><增加|加|提升|+><n>
+  const names = Object.entries(ABILITY_CN) as [AbilityKey, string][]
+  for (const [key, cn] of names) {
+    const re = new RegExp(`${cn}\\s*(?:值)?\\s*(?:增加|提升|加|\\+)\\s*(\\d+)`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(t))) {
+      spec.fixed[key] = (spec.fixed[key] ?? 0) + parseInt(m[1], 10)
+    }
+  }
+
+  // 「或者…」是并列的替代方案（如「2+1，或者三项各+1」），只取第一种，避免两种方案叠加
+  const primary = t.split('或者')[0]
+
+  // 自选（顺序式）：「一项属性提升2」+「另一项属性提升1」
+  // 「另一项…」本身含「一项…」，故用同一条正则顺序扫描，避免重复计数
+  const seq = /(?:另(?:外)?)?一项(?:不同的)?属性(?:值)?(?:增加|提升|加|\+)\s*(\d+)/g
+  let m: RegExpExecArray | null
+  while ((m = seq.exec(primary))) spec.flexible.push(parseInt(m[1], 10))
+
+  // 自选（并列式）：「N项(不同的)属性各(自)加M」
+  if (spec.flexible.length === 0) {
+    const multi = primary.match(/([一二两三四五六\d]+)项(?:不同的)?属性(?:值)?各(?:自)?(?:增加|提升|加|\+)\s*(\d+)/)
+    if (multi) {
+      const n = CN_SMALL[multi[1]] ?? (parseInt(multi[1], 10) || 0)
+      const amt = parseInt(multi[2], 10)
+      for (let i = 0; i < n; i++) spec.flexible.push(amt)
+    }
+  }
+
+  return spec
+}
+
+/** 合并多条特质的加值 */
+export function mergeAbilityBonus(specs: AbilityBonusSpec[]): AbilityBonusSpec {
+  const out: AbilityBonusSpec = { fixed: {}, flexible: [] }
+  for (const s of specs) {
+    for (const [k, v] of Object.entries(s.fixed) as [AbilityKey, number][]) {
+      out.fixed[k] = (out.fixed[k] ?? 0) + v
+    }
+    out.flexible.push(...s.flexible)
+  }
+  return out
+}
