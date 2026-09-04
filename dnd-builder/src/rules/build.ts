@@ -18,7 +18,10 @@ import {
 
 export interface DerivedAbilities {
   base: Record<AbilityKey, number>
+  /** 种族 + 背景加值（角色创建时确定） */
   bonus: Record<AbilityKey, number>
+  /** 成长：专长与升级属性值提升带来的增长 */
+  growth: Record<AbilityKey, number>
   total: Record<AbilityKey, number>
   mods: Record<AbilityKey, number>
 }
@@ -146,17 +149,31 @@ export function featSlots(cls: ClassData | null, level: number): FeatSlot[] {
 }
 
 /**
- * 种族特质给出的属性加值（2014 与第三方种族仍由种族加值；2024 种族一般为空）。
- * fixed 自动生效；flexible 是待用户指定的槽位，按 speciesPicks 逐位落到具体属性。
+ * 一个待用户分配的属性加值槽位（来自种族特质或已选专长）。
+ * key 用于在 choices.abilityPicks 中定位，稳定不随渲染变化。
  */
+export interface PendingBonus {
+  key: string
+  source: string // 显示用来源，如「种族·鸦族」「4级专长·运动精英」
+  amount: number
+  options: AbilityKey[] // 空数组 = 任意属性
+}
+
+/** 某来源可选的方案数（>1 表示原文用「或者」给了并列方案） */
+export interface BonusSource {
+  key: string // 方案选择键
+  source: string
+  spec: AbilityBonusSpec
+}
+
+/** 种族特质给出的属性加值（含被当作元信息的「属性值提升」原文） */
 export function speciesAbilityBonus(
   species: SpeciesData | null | undefined,
   subraceChoice: string
 ): AbilityBonusSpec {
-  if (!species) return { fixed: {}, flexible: [] }
+  if (!species) return { fixed: {}, schemes: [] }
   const name = effectiveSubrace(species, subraceChoice)
   const sub = (species.subraces ?? []).find(s => s.name === name)
-  // 两处来源：作为特质出现的「属性值加成」，与被当作元信息的「属性值提升/增加」原文
   const texts = [
     ...speciesTraits(species, subraceChoice).map(t => t.desc),
     species.abilityBonusText ?? '',
@@ -165,27 +182,84 @@ export function speciesAbilityBonus(
   return mergeAbilityBonus(texts.map(parseAbilityBonus))
 }
 
+/**
+ * 所有会带来属性加值的来源：种族 + 每个已选专长。
+ * 专长按槽位分别列出，因为同一个专长可能被选进多个槽位。
+ */
+export function bonusSources(
+  c: CharacterChoices,
+  loaded: LoadedEntities
+): BonusSource[] {
+  const out: BonusSource[] = []
+  const sp = speciesAbilityBonus(loaded.species, c.subraceChoice)
+  if (Object.keys(sp.fixed).length || sp.schemes.length) {
+    out.push({ key: 'species', source: `种族·${loaded.species?.nameCn ?? ''}`, spec: sp })
+  }
+  const slotLabel = (k: string) =>
+    k === 'origin' ? '起源专长' :
+    k === 'style' ? '战斗风格' :
+    k.endsWith('epic') ? '传奇恩惠' : `${k.replace(/^lv/, '')}级专长`
+  for (const [slotKey, feat] of Object.entries(c.feats)) {
+    const spec = parseAbilityBonus(feat.desc)
+    if (!Object.keys(spec.fixed).length && !spec.schemes.length) continue
+    out.push({ key: `feat:${slotKey}`, source: `${slotLabel(slotKey)}·${feat.name}`, spec })
+  }
+  return out
+}
+
+/** 某来源当前生效的方案索引（越界时回退到 0） */
+export function effectiveScheme(src: BonusSource, chosen: number | undefined): number {
+  return chosen != null && chosen >= 0 && chosen < src.spec.schemes.length ? chosen : 0
+}
+
+/** 展开为待分配槽位列表（已按所选方案取舍） */
+export function pendingBonuses(c: CharacterChoices, loaded: LoadedEntities): PendingBonus[] {
+  const out: PendingBonus[] = []
+  for (const src of bonusSources(c, loaded)) {
+    const scheme = src.spec.schemes[effectiveScheme(src, c.bonusSchemes[src.key])] ?? []
+    scheme.forEach((ch, i) => {
+      out.push({ key: `${src.key}:${i}`, source: src.source, amount: ch.amount, options: ch.options })
+    })
+  }
+  return out
+}
+
+/** 固定加值合计（种族 + 专长，无需用户分配的部分） */
+export function fixedBonuses(
+  c: CharacterChoices,
+  loaded: LoadedEntities
+): { species: Partial<Record<AbilityKey, number>>; feats: Partial<Record<AbilityKey, number>> } {
+  const species = speciesAbilityBonus(loaded.species, c.subraceChoice).fixed
+  const feats: Partial<Record<AbilityKey, number>> = {}
+  for (const feat of Object.values(c.feats)) {
+    for (const [k, v] of Object.entries(parseAbilityBonus(feat.desc).fixed) as [AbilityKey, number][]) {
+      feats[k] = (feats[k] ?? 0) + v
+    }
+  }
+  return { species, feats }
+}
+
 export function deriveAbilities(
   c: CharacterChoices,
   bg: BackgroundData | null,
-  species?: SpeciesData | null
+  species?: SpeciesData | null,
+  loaded?: LoadedEntities
 ): DerivedAbilities {
   const base = Object.fromEntries(
     ABILITY_KEYS.map(k => [k, c.baseScores[k] ?? 10])
   ) as Record<AbilityKey, number>
 
   const bonus = Object.fromEntries(ABILITY_KEYS.map(k => [k, 0])) as Record<AbilityKey, number>
+  const growth = Object.fromEntries(ABILITY_KEYS.map(k => [k, 0])) as Record<AbilityKey, number>
 
-  // 种族加值（2014/第三方种族）：固定项直接加，自选项按用户指定的槽位加
+  // 种族固定加值（2014/第三方种族；2024 种族一般为空）
   if (species) {
-    const sp = speciesAbilityBonus(species, c.subraceChoice)
-    for (const [k, v] of Object.entries(sp.fixed) as [AbilityKey, number][]) bonus[k] += v
-    sp.flexible.forEach((amt, i) => {
-      const k = c.speciesPicks[i]
-      if (k) bonus[k] += amt
-    })
+    for (const [k, v] of Object.entries(speciesAbilityBonus(species, c.subraceChoice).fixed) as [AbilityKey, number][]) {
+      bonus[k] += v
+    }
   }
 
+  // 背景加值（2024 规则的主要来源）
   if (bg && bg.abilities.length > 0) {
     if (c.bgBonusMode === '1+1+1') {
       for (const k of bg.abilities) bonus[k] += 1
@@ -196,13 +270,30 @@ export function deriveAbilities(
     }
   }
 
+  // 专长固定加值 + 所有待分配槽位 -> 成长栏
+  if (loaded) {
+    for (const feat of Object.values(c.feats)) {
+      for (const [k, v] of Object.entries(parseAbilityBonus(feat.desc).fixed) as [AbilityKey, number][]) {
+        growth[k] += v
+      }
+    }
+    for (const pb of pendingBonuses(c, loaded)) {
+      const k = c.abilityPicks[pb.key]
+      if (!k) continue
+      // 种族的自选加值属于创建时加值，专长的属于成长
+      if (pb.key.startsWith('species')) bonus[k] += pb.amount
+      else growth[k] += pb.amount
+    }
+  }
+
+  // 2024 规则：属性值上限 20
   const total = Object.fromEntries(
-    ABILITY_KEYS.map(k => [k, Math.min(20, base[k] + bonus[k])])
+    ABILITY_KEYS.map(k => [k, Math.min(20, base[k] + bonus[k] + growth[k])])
   ) as Record<AbilityKey, number>
   const mods = Object.fromEntries(
     ABILITY_KEYS.map(k => [k, abilityMod(total[k])])
   ) as Record<AbilityKey, number>
-  return { base, bonus, total, mods }
+  return { base, bonus, growth, total, mods }
 }
 
 function classLevelRow(cls: ClassData | undefined, level: number) {
@@ -230,7 +321,7 @@ export function buildStatblock(
   const species = loaded.species ?? undefined
   const bg = loaded.background ?? undefined
 
-  const ab = deriveAbilities(c, loaded.background, species)
+  const ab = deriveAbilities(c, loaded.background, species, loaded)
   const pb = proficiencyBonus(c.level)
   const level = c.level
   // 共通特质 + 所选亚种特质

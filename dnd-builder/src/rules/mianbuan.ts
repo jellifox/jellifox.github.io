@@ -83,7 +83,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
   const species = loaded.species ?? undefined
   const bg = loaded.background ?? undefined
 
-  const ab = deriveAbilities(c, loaded.background, species)
+  const ab = deriveAbilities(c, loaded.background, species, loaded)
   const pb = proficiencyBonus(c.level)
   const level = c.level
 

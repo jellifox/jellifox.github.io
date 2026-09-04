@@ -252,7 +252,8 @@ export interface CharacterChoices {
   bgBonusMode: '2+1' | '1+1+1'
   bgPlus2: AbilityKey | null // 2+1 模式下 +2 的属性
   bgPlus1: AbilityKey | null // 2+1 模式下 +1 的属性
-  speciesPicks: (AbilityKey | null)[] // 种族「自选加值」各槽位指向的属性（2014/第三方种族）
+  abilityPicks: Record<string, AbilityKey | null> // 待分配加值槽位键 -> 指定的属性
+  bonusSchemes: Record<string, number> // 加值来源键 -> 所选方案索引（原文含「或者」时）
   traitOptions: Record<string, string> // 选项式特质（精灵血系、邪魔遗赠…）-> 所选行名
   abilityMethod: AbilityMethod
   hpMethod: HpMethod

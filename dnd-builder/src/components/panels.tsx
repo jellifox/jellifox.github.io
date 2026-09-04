@@ -13,8 +13,8 @@ import {
   hpPerLevelAverage, pointBuyCost, proficiencyBonus, roll4d6DropLowest, rollDie,
 } from '../rules/rules'
 import {
-  deriveAbilities, deriveHp, effectiveBgChoice, effectiveSubrace, featSlots,
-  speciesAbilityBonus, speciesTraits, type FeatSlot,
+  bonusSources, deriveAbilities, deriveHp, effectiveBgChoice, effectiveScheme,
+  effectiveSubrace, featSlots, pendingBonuses, speciesTraits, type FeatSlot,
 } from '../rules/build'
 import {
   effectiveTraitOption, grantedSpells, traitTables,
@@ -540,8 +540,9 @@ export function AbilityPanel({
   update,
   loaded,
 }: Pick<PanelProps, 'choices' | 'update' | 'loaded'>) {
-  const ab = deriveAbilities(choices, loaded.background, loaded.species)
-  const spBonus = speciesAbilityBonus(loaded.species, choices.subraceChoice)
+  const ab = deriveAbilities(choices, loaded.background, loaded.species, loaded)
+  const pending = pendingBonuses(choices, loaded)
+  const sources = bonusSources(choices, loaded)
   const cls = loaded.cls
   const bg = loaded.background
 
@@ -730,28 +731,48 @@ export function AbilityPanel({
         </div>
       )}
 
-      {spBonus.flexible.length > 0 && (
-        <div className="bonus-row">
-          <span className="meta">种族自选加值：</span>
-          {spBonus.flexible.map((amt, i) => (
-            <label key={i} className="inline-radio">
-              +{amt} 给
+      {(sources.some(x => x.spec.schemes.length > 1) || pending.length > 0) && (
+        <div className="bonus-alloc">
+          <div className="field-label">属性加值分配（来自种族与专长）</div>
+          {sources.filter(x => x.spec.schemes.length > 1).map(src => (
+            <div className="feat-slot" key={src.key}>
+              <span className="feat-slot-label">{src.source} · 方案</span>
               <select
-                value={choices.speciesPicks[i] ?? ''}
+                value={effectiveScheme(src, choices.bonusSchemes[src.key])}
                 onChange={e =>
-                  update(prev => {
-                    const picks = [...prev.speciesPicks]
-                    picks[i] = (e.target.value || null) as AbilityKey | null
-                    return { speciesPicks: picks }
-                  })
+                  update(prev => ({
+                    bonusSchemes: { ...prev.bonusSchemes, [src.key]: parseInt(e.target.value, 10) },
+                  }))
+                }
+              >
+                {src.spec.schemes.map((sc, i) => (
+                  <option key={i} value={i}>
+                    {sc.map(x => `+${x.amount}`).join(' 与 ')}（{sc.length} 项）
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+          {pending.map(pb => (
+            <div className="feat-slot" key={pb.key}>
+              <span className="feat-slot-label">{pb.source} · +{pb.amount} 给</span>
+              <select
+                value={choices.abilityPicks[pb.key] ?? ''}
+                onChange={e =>
+                  update(prev => ({
+                    abilityPicks: {
+                      ...prev.abilityPicks,
+                      [pb.key]: (e.target.value || null) as AbilityKey | null,
+                    },
+                  }))
                 }
               >
                 <option value="">— 未指定 —</option>
-                {ABILITY_KEYS.map(k => (
+                {(pb.options.length ? pb.options : ABILITY_KEYS).map(k => (
                   <option key={k} value={k}>{ABILITY_CN[k]}</option>
                 ))}
               </select>
-            </label>
+            </div>
           ))}
         </div>
       )}
@@ -761,7 +782,8 @@ export function AbilityPanel({
           <tr>
             <th>属性</th>
             <th>基础值</th>
-            <th>加值合计</th>
+            <th>种族/背景</th>
+            <th>成长</th>
             <th>总值</th>
             <th>调整值</th>
           </tr>
@@ -823,6 +845,7 @@ export function AbilityPanel({
                 )}
               </td>
               <td className="bonus-cell">{ab.bonus[k] > 0 ? `+${ab.bonus[k]}` : '—'}</td>
+              <td className="bonus-cell">{ab.growth[k] > 0 ? `+${ab.growth[k]}` : '—'}</td>
               <td><b>{ab.total[k]}</b></td>
               <td>{fmtMod(abilityMod(ab.total[k]))}</td>
             </tr>

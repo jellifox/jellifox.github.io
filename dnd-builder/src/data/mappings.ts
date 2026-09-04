@@ -172,68 +172,110 @@ export function parseCnInt(s: string): number | null {
   return null
 }
 
-// ---------- 种族特质中的属性加值 ----------
+// ---------- 特质/专长中的属性加值 ----------
 
 /**
- * 从种族特质文本里解析属性加值。
- * 2024 规则的加值来自背景，但 2014 与第三方（谦卑林、拉尼卡等）种族仍由种族给加值。
- *
- * 固定加值："你的智力增加2点。" / "你的体质加2，你的感知加1" / "你的感知+1"
- * 自选加值："选择一项属性提升2，并选择另一项属性提升1" / "三项不同的属性各自加1"
- *   -> flexible 记录每个待分配槽位的加值点数（如 [2,1] 或 [1,1,1]）。
+ * 一个待分配的加值槽位。options 为空表示「任意属性」，
+ * 否则只能在给定的几项里选（如「你的力量或敏捷提升1」）。
+ */
+export interface AbilityChoice {
+  amount: number
+  options: AbilityKey[]
+}
+
+/**
+ * 属性加值规格。
+ * fixed   —— 已指明属性，直接生效
+ * schemes —— 待分配方案；多于一套时是「或者」并列的替代方案，由用户选其一
+ *            （如「一项属性提升2，或者两项属性各提升1」）
  */
 export interface AbilityBonusSpec {
   fixed: Partial<Record<AbilityKey, number>>
-  flexible: number[]
+  schemes: AbilityChoice[][]
 }
 
 const CN_SMALL: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
+const AB_ENTRIES = Object.entries(ABILITY_CN) as [AbilityKey, string][]
+const AB_ALT = AB_ENTRIES.map(([, cn]) => cn).join('|')
+const RAISE = '(?:增加|提升|加|\\+)'
 
+function cnToKey(cn: string): AbilityKey | undefined {
+  return AB_ENTRIES.find(([, v]) => v === cn.trim())?.[0]
+}
+
+/** 解析单套方案（已按「或者」切开） */
+function parseScheme(text: string): { fixed: Partial<Record<AbilityKey, number>>; choices: AbilityChoice[] } {
+  const fixed: Partial<Record<AbilityKey, number>> = {}
+  const choices: AbilityChoice[] = []
+  let t = text
+
+  // 1) 限定多选一：「力量或敏捷提升1」「智力、感知或魅力提升1点」
+  //    必须先于固定值匹配，否则「力量或敏捷提升1」会被当成敏捷+1。
+  const multi = new RegExp(`((?:${AB_ALT})(?:\\s*[、,，或]\\s*(?:${AB_ALT}))+)\\s*(?:值)?\\s*${RAISE}\\s*(\\d+)`, 'g')
+  const spans: [number, number][] = []
+  let m: RegExpExecArray | null
+  while ((m = multi.exec(t))) {
+    const opts = m[1].split(/[、,，或]/).map(cnToKey).filter((k): k is AbilityKey => !!k)
+    if (opts.length >= 2) {
+      choices.push({ amount: parseInt(m[2], 10), options: opts })
+      spans.push([m.index, m.index + m[0].length])
+    }
+  }
+  // 掩蔽已识别片段，避免其中的属性名再被当作固定加值
+  for (const [a, b] of spans.reverse()) t = t.slice(0, a) + ' '.repeat(b - a) + t.slice(b)
+
+  // 2) 固定：「你的智力增加2点」「体质加2，感知加1」
+  for (const [key, cn] of AB_ENTRIES) {
+    const re = new RegExp(`${cn}\\s*(?:值)?\\s*${RAISE}\\s*(\\d+)`, 'g')
+    while ((m = re.exec(t))) fixed[key] = (fixed[key] ?? 0) + parseInt(m[1], 10)
+  }
+
+  // 3) 任意属性槽位：「一项属性提升2」+「另一项属性提升1」
+  const seq = new RegExp(`(?:另(?:外)?)?一项(?:不同的)?属性(?:值)?${RAISE}\\s*(\\d+)`, 'g')
+  while ((m = seq.exec(t))) choices.push({ amount: parseInt(m[1], 10), options: [] })
+
+  // 4) 任意属性并列：「两项属性各提升1」「三项不同的属性各自加1」
+  if (!choices.some(c => c.options.length === 0)) {
+    const many = t.match(new RegExp(`([一二两三四五六\\d]+)项(?:不同的)?属性(?:值)?各(?:自)?${RAISE}\\s*(\\d+)`))
+    if (many) {
+      const n = CN_SMALL[many[1]] ?? (parseInt(many[1], 10) || 0)
+      const amt = parseInt(many[2], 10)
+      for (let i = 0; i < n; i++) choices.push({ amount: amt, options: [] })
+    }
+  }
+  return { fixed, choices }
+}
+
+/**
+ * 从特质/专长文本里解析属性加值。
+ * 2024 规则的种族不给加值（来自背景），但 2014/第三方种族与大量专长会给。
+ */
 export function parseAbilityBonus(text: string): AbilityBonusSpec {
-  const spec: AbilityBonusSpec = { fixed: {}, flexible: [] }
+  const spec: AbilityBonusSpec = { fixed: {}, schemes: [] }
   if (!text) return spec
   const t = text.replace(/\s+/g, '')
 
-  // 固定：<属性><增加|加|提升|+><n>
-  const names = Object.entries(ABILITY_CN) as [AbilityKey, string][]
-  for (const [key, cn] of names) {
-    const re = new RegExp(`${cn}\\s*(?:值)?\\s*(?:增加|提升|加|\\+)\\s*(\\d+)`, 'g')
-    let m: RegExpExecArray | null
-    while ((m = re.exec(t))) {
-      spec.fixed[key] = (spec.fixed[key] ?? 0) + parseInt(m[1], 10)
+  // 「或者」分隔的是并列可选方案，分别解析后由用户择一
+  const parts = t.split('或者').filter(Boolean)
+  for (const part of parts) {
+    const { fixed, choices } = parseScheme(part)
+    // 固定值不随方案变化，合并到顶层
+    for (const [k, v] of Object.entries(fixed) as [AbilityKey, number][]) {
+      spec.fixed[k] = Math.max(spec.fixed[k] ?? 0, v)
     }
+    if (choices.length) spec.schemes.push(choices)
   }
-
-  // 「或者…」是并列的替代方案（如「2+1，或者三项各+1」），只取第一种，避免两种方案叠加
-  const primary = t.split('或者')[0]
-
-  // 自选（顺序式）：「一项属性提升2」+「另一项属性提升1」
-  // 「另一项…」本身含「一项…」，故用同一条正则顺序扫描，避免重复计数
-  const seq = /(?:另(?:外)?)?一项(?:不同的)?属性(?:值)?(?:增加|提升|加|\+)\s*(\d+)/g
-  let m: RegExpExecArray | null
-  while ((m = seq.exec(primary))) spec.flexible.push(parseInt(m[1], 10))
-
-  // 自选（并列式）：「N项(不同的)属性各(自)加M」
-  if (spec.flexible.length === 0) {
-    const multi = primary.match(/([一二两三四五六\d]+)项(?:不同的)?属性(?:值)?各(?:自)?(?:增加|提升|加|\+)\s*(\d+)/)
-    if (multi) {
-      const n = CN_SMALL[multi[1]] ?? (parseInt(multi[1], 10) || 0)
-      const amt = parseInt(multi[2], 10)
-      for (let i = 0; i < n; i++) spec.flexible.push(amt)
-    }
-  }
-
   return spec
 }
 
-/** 合并多条特质的加值 */
+/** 合并多条来源的加值（固定值相加；待分配方案各自保留） */
 export function mergeAbilityBonus(specs: AbilityBonusSpec[]): AbilityBonusSpec {
-  const out: AbilityBonusSpec = { fixed: {}, flexible: [] }
+  const out: AbilityBonusSpec = { fixed: {}, schemes: [] }
   for (const s of specs) {
     for (const [k, v] of Object.entries(s.fixed) as [AbilityKey, number][]) {
       out.fixed[k] = (out.fixed[k] ?? 0) + v
     }
-    out.flexible.push(...s.flexible)
+    out.schemes.push(...s.schemes)
   }
   return out
 }

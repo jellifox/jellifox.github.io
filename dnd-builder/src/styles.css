@@ -672,3 +672,10 @@ textarea:focus {
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+.bonus-alloc {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
