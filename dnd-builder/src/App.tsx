@@ -16,6 +16,7 @@ const EMPTY_LOADED: LoadedEntities = {
   species: null,
   background: null,
   spellList: null,
+  multiclasses: [],
 }
 
 const DEFAULT_CHOICES: CharacterChoices = {
@@ -24,6 +25,7 @@ const DEFAULT_CHOICES: CharacterChoices = {
   level: 1,
   classUrl: '',
   subclassUrl: '',
+  multiclasses: [],
   speciesUrl: '',
   subraceChoice: '',
   sizeChoice: '',
@@ -197,18 +199,43 @@ export default function App() {
     )
   }, [book, choices.backgroundUrl])
 
+  // 兼职职业及其子职：按 url 逐个懒加载，结果与 choices.multiclasses 一一对应
+  const mcKey = (choices.multiclasses ?? []).map(m => `${m.classUrl}|${m.subclassUrl}`).join(';')
+  useEffect(() => {
+    if (!book) return
+    const picks = choices.multiclasses ?? []
+    if (picks.length === 0) {
+      setLoaded(l => (l.multiclasses.length ? { ...l, multiclasses: [] } : l))
+      return
+    }
+    let alive = true
+    Promise.all(
+      picks.map(async m => ({
+        cls: m.classUrl ? await loadClassEntity(book.meta, m.classUrl).catch(() => null) : null,
+        subclass: m.subclassUrl ? await loadSubclassEntity(book.meta, m.subclassUrl).catch(() => null) : null,
+      }))
+    ).then(list => { if (alive) setLoaded(l => ({ ...l, multiclasses: list })) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, mcKey])
+
+  // 法术表：起始职业与所有兼职职业的法术并集（总表按职业列筛选）
+  const classTitlesKey = [choices.classUrl, ...(choices.multiclasses ?? []).map(m => m.classUrl)]
+    .filter(Boolean).join(';')
   useEffect(() => {
     if (!book || !choices.classUrl) return trackEntity('spellList', '', null)
-    const entry = book.index.classes.find(c => c.url === choices.classUrl)
-    // 法术速查现为若干「万法大全」总表，全部载入后按职业筛选
+    const titles = classTitlesKey.split(';')
+      .map(u => book.index.classes.find(c => c.url === u)?.title)
+      .filter((t): t is string => !!t)
     const urls = book.index.spellLists.map(s => s.url)
-    if (!entry || urls.length === 0) return trackEntity('spellList', '', null)
+    if (titles.length === 0 || urls.length === 0) return trackEntity('spellList', '', null)
     return trackEntity(
       'spellList',
-      urls.join(','),
-      loadSpellListEntity(book.meta, urls, entry.title)
+      urls.join(',') + '#' + classTitlesKey,
+      loadSpellListEntity(book.meta, urls, titles)
     )
-  }, [book, choices.classUrl])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, classTitlesKey])
 
   const statblock = useMemo(
     () => buildStatblock(choices, book?.meta ?? null, loaded),

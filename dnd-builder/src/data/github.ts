@@ -43,11 +43,45 @@ function decodeHtml(buf: ArrayBuffer): string {
   }
 }
 
+// 并发上限：一次性并发十几个请求（如兼职选择器载入全部职业）会被 raw.githubusercontent.com
+// 限流，大量请求直接失败。排队后最多同时 MAX_CONCURRENT 个。
+const MAX_CONCURRENT = 4
+let active = 0
+const queue: (() => void)[] = []
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>(r => queue.push(r))
+  active++
+  try {
+    return await fn()
+  } finally {
+    active--
+    queue.shift()?.()
+  }
+}
+
 async function fetchRawBuffer(ref: string, path: string): Promise<ArrayBuffer> {
   const url = `${RAW}/${ref}/${path.split('/').map(encodeURIComponent).join('/')}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`下载失败（${res.status}）：${path}`)
-  return res.arrayBuffer()
+  return withSlot(async () => {
+    // 网络层瞬断（TypeError: Failed to fetch）或 429/5xx 时退避重试至多两次；404 等确定性错误不重试
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetch(url)
+        if (res.ok) return res.arrayBuffer()
+        if (attempt < 2 && (res.status === 429 || res.status >= 500)) {
+          await new Promise(r => setTimeout(r, 800 * (attempt + 1)))
+          continue
+        }
+        throw new Error(`下载失败（${res.status}）：${path}`)
+      } catch (e) {
+        if (attempt < 2 && e instanceof TypeError) {
+          await new Promise(r => setTimeout(r, 800 * (attempt + 1)))
+          continue
+        }
+        throw e
+      }
+    }
+  })
 }
 
 /** 拉取并解码一个 htm/html 页面 */
@@ -63,7 +97,7 @@ export async function fetchWcp(ref: string): Promise<string> {
 
 // ---------- 按 SHA 失效的 localStorage 缓存 ----------
 
-export const PARSER_VERSION = 14
+export const PARSER_VERSION = 15
 const PREFIX = 'dnd5r-builder'
 
 function cacheKey(kind: string): string {

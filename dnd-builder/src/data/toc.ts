@@ -90,7 +90,8 @@ function classChildKind(title: string, url: string): 'separator' | 'spelllist' |
   if (/法术列表/.test(title)) return 'spelllist'
   // 这些是「从列表里挑选的职业资源」，不是子职：
   // 超魔法选项 / 魔能祈唤选项 / 禁令恩惠选项 / 战技选项 / 武器精通选项 …、血咒
-  if (/选项/.test(title) || /血咒/.test(title)) return 'optional'
+  // 「可选职业特性」是 TCE 式的追加特性页，同样不是子职
+  if (/选项|可选职业特性|血咒/.test(title)) return 'optional'
   return 'subclass'
 }
 

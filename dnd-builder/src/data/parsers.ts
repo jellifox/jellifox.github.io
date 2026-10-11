@@ -514,6 +514,17 @@ export function parseClass(html: string, path: string): ClassData | null {
 
   const spellAbilityM = flat.match(/施法属性是(力量|敏捷|体质|智力|感知|魅力)/)
 
+  // 「作为兼职角色」段：兼职时只获得其中列出的部分熟练；第三方职业还会在此写明兼职先决。
+  // 截到该段之后的第一个「获得XX的1级特性」或「职业特性」标题为止。
+  const flatOne = flat.replace(/\s+/g, ' ')
+  const mcI = flatOne.indexOf('作为兼职角色')
+  let multiclassText = ''
+  if (mcI !== -1) {
+    const tail = flatOne.slice(mcI)
+    const end = tail.search(/职业特性\s*[A-Za-z]|Class Features/)
+    multiclassText = (end > 0 ? tail.slice(0, end) : tail.slice(0, 400)).trim()
+  }
+
   const flavorM = doc.querySelector('p.sum')
   let flavor = flavorM ? (flavorM.textContent ?? '').trim() : ''
   if (!flavor) {
@@ -540,6 +551,7 @@ export function parseClass(html: string, path: string): ClassData | null {
     armorTraining: core.armor ?? '',
     equipmentOptions: parseEquipOptions(core.equipment ?? ''),
     spellAbility: spellAbilityM ? cnToAbilities(spellAbilityM[1])[0] ?? null : null,
+    multiclassText,
     levels,
     subclasses: [],
   }

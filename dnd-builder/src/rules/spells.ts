@@ -13,6 +13,7 @@ import type {
   CharacterChoices, LoadedEntities, SpellEntry, TraitEntry,
 } from '../types'
 import { speciesTraits } from './build'
+import { classInstances } from './multiclass'
 import { subclassFeatureLevel } from '../data/parsers'
 
 export interface GrantedSpell {
@@ -141,11 +142,14 @@ export function grantedSpells(c: CharacterChoices, loaded: LoadedEntities): Gran
   }
 
   collect(speciesTraits(loaded.species, c.subraceChoice), '种族')
-  if (loaded.subclass) {
-    for (const f of loaded.subclass.features) {
+  // 子职特性按该职业自己的等级解锁（兼职时与总等级不同）
+  for (const inst of classInstances(c, loaded)) {
+    if (!inst.subclass) continue
+    for (const f of inst.subclass.features) {
       const lv = subclassFeatureLevel(f.name)
-      if (lv > c.level) continue
-      collect([f], `子职·${loaded.subclass.nameCn}`, lv)
+      if (lv > inst.level) continue
+      // 职业等级 ≤ 总等级，故以职业等级标注不会被末尾的总等级过滤误删
+      collect([f], `子职·${inst.subclass.nameCn}`, lv)
     }
   }
   for (const f of Object.values(c.feats)) collect([f], '专长')

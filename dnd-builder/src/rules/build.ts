@@ -12,9 +12,12 @@ import {
 } from '../data/mappings'
 import { subclassFeatureLevel } from '../data/parsers'
 import {
-  ARMORS, WEAPONS, abilityMod, armorClassValue, averageHp, fmtMod,
-  proficiencyBonus, rolledHp, weaponAttackAbility,
+  ARMORS, WEAPONS, abilityMod, armorClassValue, fmtMod, hpPerLevelAverage,
+  proficiencyBonus, weaponAttackAbility,
 } from './rules'
+import {
+  classInstances, classSummary, hitDiceLabel, hitDieSequence, spellSlotsFor,
+} from './multiclass'
 
 export interface DerivedAbilities {
   base: Record<AbilityKey, number>
@@ -70,34 +73,40 @@ export function effectiveSubrace(species: SpeciesData | null | undefined, choice
 
 /**
  * 生命值上限的唯一计算入口（角色卡预览、面团导出、属性面板都经由此处，避免各算各的）。
- * 顺序：按方式取基础值 -> 加种族/专长的每级加成（矮人刚毅、强健身心等）。
+ * 兼职规则：只有起始职业的 1 级取生命骰最大值，其余每一级（含兼职职业的第一级）
+ * 都按该级所属职业的生命骰取平均或投骰。最后加上种族/专长的每级加成。
  * 手动模式直接采用用户填写的数值，不再叠加任何加成。
  */
 export function deriveHp(
   c: CharacterChoices,
-  cls: ClassData | null | undefined,
+  loaded: LoadedEntities,
   spTraits: TraitEntry[],
   conMod: number
-): { max: number; hitDie: number; bonusPerLevel: number; source: string } {
-  const hitDie = cls?.hitDie ?? 8
-  const level = c.level
+): { max: number; hitDie: number; dice: number[]; bonusPerLevel: number; source: string } {
+  const seq = hitDieSequence(classInstances(c, loaded))
+  const hitDie = seq[0] ?? 8
+  // 职业尚未加载时按 d8 占位，保证有结果
+  const dice = seq.length ? seq : Array.from({ length: c.level }, () => 8)
 
   // 每级额外生命值：矮人刚毅（生命值上限加1/级）、强健身心 Tough（+2/级）
   let bonusPerLevel = 0
   if (spTraits.some(t => /生命值上限加1/.test(t.desc))) bonusPerLevel += 1
-  const tough = Object.values(c.feats).some(f => /强健身心|Tough/i.test(f.name))
-  if (tough) bonusPerLevel += 2
+  if (Object.values(c.feats).some(f => /强健身心|Tough/i.test(f.name))) bonusPerLevel += 2
 
   if (c.hpMethod === 'manual' && c.hpManual != null) {
-    return { max: Math.max(1, c.hpManual), hitDie, bonusPerLevel, source: '手动指定' }
+    return { max: Math.max(1, c.hpManual), hitDie, dice, bonusPerLevel, source: '手动指定' }
   }
-  const base =
-    c.hpMethod === 'roll'
-      ? rolledHp(hitDie, level, conMod, c.hpRolls)
-      : averageHp(hitDie, level, conMod)
+  let base = dice[0] + conMod
+  for (let i = 1; i < dice.length; i++) {
+    const r = c.hpMethod === 'roll'
+      ? (c.hpRolls[i - 1] ?? hpPerLevelAverage(dice[i]))
+      : hpPerLevelAverage(dice[i])
+    base += r + conMod
+  }
   return {
-    max: base + bonusPerLevel * level,
+    max: Math.max(dice.length, base) + bonusPerLevel * dice.length,
     hitDie,
+    dice,
     bonusPerLevel,
     source: c.hpMethod === 'roll' ? '逐级投骰' : '固定平均值',
   }
@@ -106,9 +115,10 @@ export function deriveHp(
 // ---------- 专长槽位（按 5R 升级规则从职业等级表推导） ----------
 
 export interface FeatSlot {
-  key: string // choices.feats 的键
+  key: string // choices.feats 的键（兼职职业带 'mc0:' 前缀）
   label: string
   kind: 'general' | 'style' | 'epic'
+  level: number // 该槽位对应的职业等级
 }
 
 /**
@@ -118,7 +128,12 @@ export interface FeatSlot {
  * - 「传奇恩惠」（19级）-> 传奇恩惠专长槽
  * 起源专长来自背景，不在此列。
  */
-export function featSlots(cls: ClassData | null, level: number): FeatSlot[] {
+export function featSlots(
+  cls: ClassData | null,
+  level: number,
+  prefix = '',
+  classTag = ''
+): FeatSlot[] {
   if (!cls) return []
   const out: FeatSlot[] = []
   let hasStyle = false
@@ -127,25 +142,36 @@ export function featSlots(cls: ClassData | null, level: number): FeatSlot[] {
     const fs = row.features.join(' ')
     if (!hasStyle && /战斗风格/.test(fs)) {
       hasStyle = true
-      out.push({ key: 'style', label: `战斗风格（${row.level}级职业特性）`, kind: 'style' })
+      out.push({ key: `${prefix}style`, label: `${classTag}战斗风格（${row.level}级职业特性）`, kind: 'style', level: row.level })
     }
     if (/属性值提升/.test(fs)) {
-      out.push({ key: `lv${row.level}`, label: `${row.level}级 · 属性值提升或通用专长`, kind: 'general' })
+      out.push({ key: `${prefix}lv${row.level}`, label: `${classTag}${row.level}级 · 属性值提升或通用专长`, kind: 'general', level: row.level })
     }
     if (/传奇恩惠/.test(fs)) {
-      out.push({ key: `lv${row.level}epic`, label: `${row.level}级 · 传奇恩惠`, kind: 'epic' })
+      out.push({ key: `${prefix}lv${row.level}epic`, label: `${classTag}${row.level}级 · 传奇恩惠`, kind: 'epic', level: row.level })
     }
   }
   // 等级表缺失/未解析出提升行时退回标准 4/8/12/16（19 传奇恩惠）
   if (!out.some(s => s.kind === 'general')) {
     for (const lv of [4, 8, 12, 16]) {
-      if (lv <= level) out.push({ key: `lv${lv}`, label: `${lv}级 · 属性值提升或通用专长`, kind: 'general' })
+      if (lv <= level) out.push({ key: `${prefix}lv${lv}`, label: `${classTag}${lv}级 · 属性值提升或通用专长`, kind: 'general', level: lv })
     }
   }
   if (level >= 19 && !out.some(s => s.kind === 'epic')) {
-    out.push({ key: 'lv19epic', label: '19级 · 传奇恩惠', kind: 'epic' })
+    out.push({ key: `${prefix}lv19epic`, label: `${classTag}19级 · 传奇恩惠`, kind: 'epic', level: 19 })
   }
   return out
+}
+
+/**
+ * 所有职业的专长槽位。兼职规则下属性值提升按「各职业自己的等级」给出
+ * （如术士4/圣武士1 只在术士4级有一次），因此逐职业实例计算再合并。
+ * 起始职业键不带前缀以兼容旧存档；仅兼职时才在标签前注明职业名。
+ */
+export function allFeatSlots(c: CharacterChoices, loaded: LoadedEntities): FeatSlot[] {
+  const inst = classInstances(c, loaded)
+  const tag = inst.length > 1
+  return inst.flatMap(i => featSlots(i.cls, i.level, i.keyPrefix, tag ? `${i.cls.nameCn}` : ''))
 }
 
 /**
@@ -195,10 +221,10 @@ export function bonusSources(
   if (Object.keys(sp.fixed).length || sp.schemes.length) {
     out.push({ key: 'species', source: `种族·${loaded.species?.nameCn ?? ''}`, spec: sp })
   }
+  // 槽位标签取自 allFeatSlots，兼职职业的键带 'mc0:' 前缀，不能再靠解析键名
+  const labels = new Map(allFeatSlots(c, loaded).map(sl => [sl.key, sl.label.replace(/ · .*$/, '')]))
   const slotLabel = (k: string) =>
-    k === 'origin' ? '起源专长' :
-    k === 'style' ? '战斗风格' :
-    k.endsWith('epic') ? '传奇恩惠' : `${k.replace(/^lv/, '')}级专长`
+    k === 'origin' ? '起源专长' : labels.get(k) ?? '专长'
   for (const [slotKey, feat] of Object.entries(c.feats)) {
     const spec = parseAbilityBonus(feat.desc)
     if (!Object.keys(spec.fixed).length && !spec.schemes.length) continue
@@ -328,9 +354,9 @@ export function buildStatblock(
   const spTraits = speciesTraits(species, c.subraceChoice)
 
   // ---- 生命值 / 护甲 ----
-  const hpInfo = deriveHp(c, cls, spTraits, ab.mods.CON)
-  const hitDie = hpInfo.hitDie
+  const hpInfo = deriveHp(c, loaded, spTraits, ab.mods.CON)
   const hp = hpInfo.max
+  const inst = classInstances(c, loaded)
 
   const armor = ARMORS.find(a => a.id === c.armorId) ?? ARMORS[0]
   const acValue = armorClassValue(armor, ab.mods.DEX, c.shield)
@@ -345,7 +371,12 @@ export function buildStatblock(
     savingThrows[`${ABILITY_FULL_EN[k]}_save` as keyof typeof savingThrows] = ab.mods[k] + pb
   }
 
-  const profSkills = new Set<SkillKey>([...(bg?.skills ?? []), ...c.classSkills])
+  const profSkills = new Set<SkillKey>([
+    ...(bg?.skills ?? []),
+    ...c.classSkills,
+    // 兼职职业给的那一项自选技能
+    ...(c.multiclasses ?? []).map(m => m.skill).filter((x): x is SkillKey => !!x),
+  ])
   // 种族特质授予的技能熟练（如兔人的“小兔感官：你拥有察觉技能的熟练”）
   for (const t of spTraits) {
     const m = t.desc.match(/拥有(?:对)?([^\n。，]{1,6})技能的熟练|获得([^\n。，]{1,6})技能熟练/)
@@ -383,31 +414,29 @@ export function buildStatblock(
         : { name: `【起源专长】${bg.feat}`, desc: `来自背景「${bg.nameCn}」。` }
     )
   }
-  for (const slot of featSlots(cls ?? null, level)) {
+  for (const slot of allFeatSlots(c, loaded)) {
     const f = c.feats[slot.key]
     if (!f) continue
     const tag =
       slot.kind === 'style' ? '战斗风格' :
       slot.kind === 'epic' ? '传奇恩惠' :
-      `${slot.key.slice(2)}级专长`
+      `${slot.level}级专长`
     specials.push({ name: `【${tag}】${f.name}`, desc: f.desc })
   }
-  const feats = gainedFeatures(cls, level)
-  if (feats.length) {
-    const byLevel = new Map<number, string[]>()
-    for (const f of feats) {
-      byLevel.set(f.level, [...(byLevel.get(f.level) ?? []), f.name])
+  // 职业特性按各职业自己的等级给出（兼职规则）
+  for (const i of inst) {
+    const gained = gainedFeatures(i.cls, i.level)
+    if (gained.length) {
+      const byLevel = new Map<number, string[]>()
+      for (const f of gained) byLevel.set(f.level, [...(byLevel.get(f.level) ?? []), f.name])
+      const lines = [...byLevel.entries()].map(([lv, names]) => `${lv}级：${names.join('、')}`)
+      specials.push({ name: `【职业特性】${i.cls.nameCn}${inst.length > 1 ? ` ${i.level}级` : ''}`, desc: lines.join('\n') })
     }
-    const lines = [...byLevel.entries()].map(([lv, names]) => `${lv}级：${names.join('、')}`)
-    specials.push({
-      name: `【职业特性】${cls!.nameCn}`,
-      desc: lines.join('\n'),
-    })
-  }
-  if (sub) {
-    for (const f of sub.features) {
-      if (subclassFeatureLevel(f.name) <= level) {
-        specials.push({ name: `【子职·${sub.nameCn}】${f.name}`, desc: f.desc })
+    if (i.subclass) {
+      for (const f of i.subclass.features) {
+        if (subclassFeatureLevel(f.name) <= i.level) {
+          specials.push({ name: `【子职·${i.subclass.nameCn}】${f.name}`, desc: f.desc })
+        }
       }
     }
   }
@@ -434,28 +463,34 @@ export function buildStatblock(
   }
 
   // ---- 法术 ----
-  const row = classLevelRow(cls, level)
+  // 兼职时按「兼职施法者表」合算法术位；契约魔法独立计算
+  const slotInfo = spellSlotsFor(inst)
   const spellSlots: SpellSlots[] = []
-  if (row?.slots) {
-    for (const [lv, count] of Object.entries(row.slots)) {
-      spellSlots.push({
-        level: parseInt(lv, 10),
-        limit: { name: `${lv}环法术位`, uses: count as number, resets: ['长休'] },
-      })
-    }
-  }
-  if (row?.pactSlots && row.pactSlots.count > 0) {
+  for (const [lv, count] of Object.entries(slotInfo.slots)) {
     spellSlots.push({
-      level: row.pactSlots.level,
-      limit: { name: '魔契法术位', uses: row.pactSlots.count, resets: ['短休', '长休'] },
+      level: parseInt(lv, 10),
+      limit: { name: `${lv}环法术位`, uses: count as number, resets: ['长休'] },
     })
   }
+  if (slotInfo.pact) {
+    spellSlots.push({
+      level: slotInfo.pact.level,
+      limit: { name: '魔契法术位', uses: slotInfo.pact.count, resets: ['短休', '长休'] },
+    })
+  }
+  // 法术 DC / 攻击：列出每个施法职业（各自用自己的施法属性）
+  const casterClasses = inst.filter(i => i.cls.spellAbility)
   let spellDc: string | null = null
   let spellAttack: string | null = null
-  if (cls?.spellAbility && spellSlots.length > 0) {
-    const m = ab.mods[cls.spellAbility]
-    spellDc = `${8 + pb + m}（${ABILITY_CN[cls.spellAbility]}）`
-    spellAttack = fmtMod(pb + m)
+  if (casterClasses.length && spellSlots.length > 0) {
+    spellDc = casterClasses
+      .map(i => `${8 + pb + ab.mods[i.cls.spellAbility!]}（${ABILITY_CN[i.cls.spellAbility!]}${casterClasses.length > 1 ? '·' + i.cls.nameCn : ''}）`)
+      .filter((v, k, a) => a.indexOf(v) === k)
+      .join(' / ')
+    spellAttack = casterClasses
+      .map(i => fmtMod(pb + ab.mods[i.cls.spellAbility!]))
+      .filter((v, k, a) => a.indexOf(v) === k)
+      .join(' / ')
   }
   const spells = [
     ...c.spells,
@@ -481,7 +516,9 @@ export function buildStatblock(
   // ---- about ----
   const aboutParts: string[] = []
   if (species) aboutParts.push(`种族：${species.nameCn} ${species.nameEn}`)
-  if (cls) aboutParts.push(`职业：${cls.nameCn} ${cls.nameEn} ${level}级${sub ? `（${sub.nameCn}）` : ''}`)
+  if (inst.length) {
+    aboutParts.push(`职业：${inst.map(i => `${i.cls.nameCn} ${i.level}级${i.subclass ? `（${i.subclass.nameCn}）` : ''}`).join(' / ')}`)
+  }
   if (bg) aboutParts.push(`背景：${bg.nameCn} ${bg.nameEn}`)
   if (c.about.trim()) aboutParts.push(c.about.trim())
 
@@ -493,10 +530,10 @@ export function buildStatblock(
     size: SIZE_CN_TO_EN[sizeCn] ?? 'Medium',
     type: 'humanoid',
     subtype: species ? `${species.nameCn} ${species.nameEn}`.trim() : null,
-    group: cls ? `${cls.nameCn} ${level}级` : null,
+    group: inst.length ? classSummary(inst) : null,
     alignment: c.alignment,
     armor_class: { value: acValue, special: acSpecial },
-    hp: { value: hp, hit_dice: cls ? `${level}d${hitDie}` : null },
+    hp: { value: hp, hit_dice: inst.length ? hitDiceLabel(inst) : null },
     speed: { walk: species?.speed ?? 30 },
     stats: {
       strength: ab.total.STR,

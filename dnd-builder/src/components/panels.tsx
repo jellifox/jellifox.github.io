@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
-  AbilityKey, CharacterChoices, FeatPage, LoadedEntities, SkillKey,
+  AbilityKey, CharacterChoices, ClassData, FeatPage, LoadedEntities, MulticlassPick, SkillKey,
 } from '../types'
-import { loadFeatPageEntity, type BookData } from '../data/loader'
+import { loadClassEntity, loadFeatPageEntity, type BookData } from '../data/loader'
 import type { EntityFlags } from '../App'
 import {
   ABILITY_CN, ABILITY_KEYS, ALIGNMENTS, SKILL_ABILITY, SKILL_CN, SKILL_KEYS,
@@ -13,9 +13,13 @@ import {
   hpPerLevelAverage, pointBuyCost, proficiencyBonus, roll4d6DropLowest, rollDie,
 } from '../rules/rules'
 import {
-  bonusSources, deriveAbilities, deriveHp, effectiveBgChoice, effectiveScheme,
-  effectiveSubrace, featSlots, pendingBonuses, speciesTraits, type FeatSlot,
+  allFeatSlots, bonusSources, deriveAbilities, deriveHp, effectiveBgChoice, effectiveScheme,
+  effectiveSubrace, pendingBonuses, speciesTraits, type FeatSlot,
 } from '../rules/build'
+import {
+  classInstances, multiclassBlockers, multiclassLevelSum, multiclassProfs,
+  prereqLabel, prereqOf, primaryClassLevel, spellSlotsFor, unmetPrereq,
+} from '../rules/multiclass'
 import {
   effectiveTraitOption, grantedSpells, traitTables,
 } from '../rules/spells'
@@ -120,10 +124,11 @@ export function BasicsPanel({
           />
         </label>
         <label>
-          等级（1-20）
+          {multiclassLevelSum(choices) > 0 ? '总等级（含兼职）' : '等级（1-20）'}
           <NumberField
             value={choices.level}
-            min={1}
+            // 兼职时起始职业至少保留 1 级
+            min={multiclassLevelSum(choices) + 1}
             max={20}
             onCommit={v => update({ level: v ?? choices.level })}
           />
@@ -178,12 +183,17 @@ export function ClassPanel({ book, choices, update, loaded, flags }: PanelProps)
             className={`chip ${choices.classUrl === c.url ? 'active' : ''}`}
             title={c.source}
             onClick={() =>
-              update({
-                classUrl: c.url,
-                subclassUrl: '',
-                classSkills: [],
-                classEquipChoice: 0,
-                spells: [],
+              update(prev => {
+                // 若新的起始职业原本是兼职之一，把它从兼职里移除（等级并回总等级不变）
+                const dup = (prev.multiclasses ?? []).find(m => m.classUrl === c.url)
+                return {
+                  classUrl: c.url,
+                  subclassUrl: '',
+                  classSkills: [],
+                  classEquipChoice: 0,
+                  spells: [],
+                  multiclasses: dup ? (prev.multiclasses ?? []).filter(m => m !== dup) : prev.multiclasses,
+                }
               })
             }
           >
@@ -279,9 +289,222 @@ export function ClassPanel({ book, choices, update, loaded, flags }: PanelProps)
               </div>
             </>
           )}
+
+          <MulticlassSection book={book} choices={choices} update={update} loaded={loaded} flags={flags} />
         </>
       )}
     </Section>
+  )
+}
+
+// ---------- 兼职 ----------
+
+/**
+ * 兼职区块。等级约定：总等级 = 起始职业等级 + Σ兼职等级；增减兼职等级时同步调整总等级，
+ * 使起始职业等级保持不变（符合「升一级、这级拿兼职」的直觉）。
+ * 先决（玩家手册2024）：新职业与所有当前职业的主要属性都要 ≥13。
+ */
+function MulticlassSection({ book, choices, update, loaded }: PanelProps) {
+  const [picking, setPicking] = useState(false)
+  // 候选职业的解析结果（用于展示先决）；只在展开选择器时才拉取，结果有缓存
+  const [candidates, setCandidates] = useState<Record<string, ClassData | 'loading' | 'error'>>({})
+  const mcs = choices.multiclasses ?? []
+  const totals = deriveAbilities(choices, loaded.background, loaded.species, loaded).total
+  const primary = loaded.cls!
+  const currentClasses = [primary, ...loaded.multiclasses.map(m => m.cls).filter((c): c is ClassData => !!c)]
+  const primaryUnmet = unmetPrereq(prereqOf(primary), totals)
+  const takenUrls = new Set([choices.classUrl, ...mcs.map(m => m.classUrl)])
+  const pool = book.index.classes.filter(c => c.title !== '兼职规则' && !takenUrls.has(c.url))
+
+  useEffect(() => {
+    if (!picking) return
+    for (const c of pool) {
+      if (candidates[c.url]) continue
+      setCandidates(p => ({ ...p, [c.url]: 'loading' }))
+      loadClassEntity(book.meta, c.url)
+        .then(cd => setCandidates(p => ({ ...p, [c.url]: cd })))
+        .catch(() => setCandidates(p => ({ ...p, [c.url]: 'error' })))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picking, book.meta.sha])
+
+  const fmtUnmet = (u: AbilityKey[][]) =>
+    u.map(g => g.map(k => `${ABILITY_CN[k]}${totals[k]}`).join('或')).join('、')
+
+  function addClass(url: string) {
+    if (choices.level >= 20) return
+    update(prev => ({
+      multiclasses: [...(prev.multiclasses ?? []), { classUrl: url, subclassUrl: '', level: 1, skill: null }],
+      level: prev.level + 1,
+    }))
+    setPicking(false)
+  }
+  function setMc(i: number, patch: Partial<MulticlassPick>) {
+    update(prev => {
+      const list = [...(prev.multiclasses ?? [])]
+      const oldLv = list[i].level
+      list[i] = { ...list[i], ...patch }
+      // 兼职等级变化同步到总等级，保持起始职业等级不变
+      const dLv = (patch.level ?? oldLv) - oldLv
+      return { multiclasses: list, level: prev.level + dLv }
+    })
+  }
+  function removeMc(i: number) {
+    update(prev => {
+      const list = [...(prev.multiclasses ?? [])]
+      const [gone] = list.splice(i, 1)
+      // 删除时清掉该兼职名下的专长槽位，并把之后的槽位前缀前移
+      const feats: typeof prev.feats = {}
+      for (const [k, v] of Object.entries(prev.feats)) {
+        const m = k.match(/^mc(\d+):(.*)$/)
+        if (!m) { feats[k] = v; continue }
+        const n = parseInt(m[1], 10)
+        if (n === i) continue
+        feats[n > i ? `mc${n - 1}:${m[2]}` : k] = v
+      }
+      return { multiclasses: list, level: Math.max(1, prev.level - gone.level), feats }
+    })
+  }
+
+  return (
+    <div className="multiclass">
+      <div className="field-label">
+        兼职
+        {mcs.length > 0 && (
+          <span className="meta">
+            （总等级 {choices.level} = {primary.nameCn} {primaryClassLevel(choices)}
+            {mcs.map((m, i) => ` + ${loaded.multiclasses[i]?.cls?.nameCn ?? '…'} ${m.level}`).join('')}）
+          </span>
+        )}
+      </div>
+
+      <p className={`meta ${primaryUnmet.length ? 'warn' : ''}`}>
+        起始职业 {primary.nameCn} 的兼职先决：{prereqLabel(prereqOf(primary))}
+        {primaryUnmet.length
+          ? ` ✗ 未满足（${fmtUnmet(primaryUnmet)}）——起始职业不满足时无法兼职任何职业`
+          : ' ✓'}
+      </p>
+
+      {mcs.map((m, i) => {
+        const lc = loaded.multiclasses[i]?.cls
+        const entry = book.index.classes.find(c => c.url === m.classUrl)
+        const unmet = lc ? unmetPrereq(prereqOf(lc), totals) : []
+        const profs = lc ? multiclassProfs(lc) : null
+        const profText = profs && [
+          profs.weapons, profs.light && '轻甲', profs.medium && '中甲', profs.heavy && '重甲',
+          profs.shield && '盾牌', profs.tools,
+        ].filter(Boolean).join('、')
+        const skillOpts = profs?.skillChoices === 'any' ? SKILL_KEYS : (profs?.skillChoices ?? null)
+        return (
+          <div key={m.classUrl} className="mc-row">
+            <div className="feat-slot">
+              <b>{entry?.title ?? '…'}</b>
+              <span className="stepper">
+                <button
+                  disabled={m.level <= 1}
+                  onClick={() => setMc(i, { level: m.level - 1 })}
+                >−</button>
+                <b>{m.level} 级</b>
+                <button
+                  disabled={choices.level >= 20}
+                  onClick={() => setMc(i, { level: m.level + 1 })}
+                >＋</button>
+              </span>
+              {entry && entry.subclasses.length > 0 && (
+                <select
+                  value={m.subclassUrl}
+                  onChange={e => setMc(i, { subclassUrl: e.target.value })}
+                >
+                  <option value="">— 子职 —</option>
+                  {entry.subclasses.map(sc => (
+                    <option key={sc.url} value={sc.url}>{sc.title}</option>
+                  ))}
+                </select>
+              )}
+              {skillOpts && (
+                <select
+                  value={m.skill ?? ''}
+                  onChange={e => setMc(i, { skill: (e.target.value || null) as SkillKey | null })}
+                >
+                  <option value="">— 兼职技能 —</option>
+                  {skillOpts.map(k => <option key={k} value={k}>{SKILL_CN[k]}</option>)}
+                </select>
+              )}
+              <button className="btn small" onClick={() => removeMc(i)}>移除</button>
+            </div>
+            <p className="meta">
+              {lc
+                ? <>兼职获得：生命骰 d{lc.hitDie}{profText ? `、${profText}` : ''}（不获得豁免熟练）</>
+                : '⏳ 正在载入…'}
+            </p>
+            {lc && unmet.length > 0 && (
+              <p className="meta warn">
+                ✗ 不满足 {lc.nameCn} 的兼职先决（{prereqLabel(prereqOf(lc))}；当前 {fmtUnmet(unmet)}）
+              </p>
+            )}
+          </div>
+        )
+      })}
+
+      {!picking ? (
+        <button
+          className="btn small"
+          disabled={choices.level >= 20 || primaryUnmet.length > 0}
+          title={primaryUnmet.length ? '起始职业不满足兼职先决' : ''}
+          onClick={() => setPicking(true)}
+        >
+          ＋ 添加兼职
+        </button>
+      ) : (
+        <div className="mc-picker">
+          <div className="meta">
+            选择要兼职的职业（新职业与所有当前职业的主要属性都需 ≥13；灰色为不满足）：
+          </div>
+          <div className="chip-row">
+            {pool.map(c => {
+              const cd = candidates[c.url]
+              if (cd === 'loading' || cd === undefined) {
+                return <span key={c.url} className="chip small">{c.title} ⏳</span>
+              }
+              if (cd === 'error') {
+                return (
+                  <button
+                    key={c.url}
+                    className="chip small"
+                    title="载入失败，点击重试"
+                    onClick={() => {
+                      setCandidates(p => ({ ...p, [c.url]: 'loading' }))
+                      loadClassEntity(book.meta, c.url)
+                        .then(cd2 => setCandidates(p => ({ ...p, [c.url]: cd2 })))
+                        .catch(() => setCandidates(p => ({ ...p, [c.url]: 'error' })))
+                    }}
+                  >
+                    {c.title} ⚠ 重试
+                  </button>
+                )
+              }
+              const blockers = multiclassBlockers(currentClasses, cd, totals)
+              const reason = blockers
+                .map(b => `${b.cls.nameCn}需要${prereqLabel(prereqOf(b.cls))}（当前${fmtUnmet(b.unmet)}）`)
+                .join('；')
+              return (
+                <button
+                  key={c.url}
+                  className="chip small"
+                  disabled={blockers.length > 0}
+                  title={blockers.length ? reason : `先决：${prereqLabel(prereqOf(cd))} ✓`}
+                  onClick={() => addClass(c.url)}
+                >
+                  {c.title}
+                  <span className="tag">{prereqLabel(prereqOf(cd))}</span>
+                </button>
+              )
+            })}
+          </div>
+          <button className="btn small" onClick={() => setPicking(false)}>取消</button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -869,33 +1092,36 @@ function HpBlock({
   const cls = loaded.cls
   const spTraits = speciesTraits(loaded.species, effectiveSubrace(loaded.species, choices.subraceChoice))
   const conMod = ab.mods.CON
-  const hp = deriveHp(choices, cls, spTraits, conMod)
-  const perLevelAvg = hpPerLevelAverage(hp.hitDie)
+  const hp = deriveHp(choices, loaded, spTraits, conMod)
+  // 每一级各自的生命骰（兼职时不同职业的级用不同骰子）；hpRolls[i] 对应 dice[i+1]
+  const dice = hp.dice
+  const need = Math.max(0, dice.length - 1)
+  const dieOf = (i: number) => dice[i + 1] ?? hp.hitDie
+  const multiDie = new Set(dice).size > 1
 
   // 投骰模式下升级后补投新增等级（已投出的结果保持不变，不会因升级被重置）
-  const need = Math.max(0, choices.level - 1)
   useEffect(() => {
     if (choices.hpMethod !== 'roll' || choices.hpRolls.length >= need) return
     update(prev => ({
       hpRolls: [
         ...prev.hpRolls,
-        ...Array.from({ length: need - prev.hpRolls.length }, () => rollDie(hp.hitDie)),
+        ...Array.from({ length: need - prev.hpRolls.length }, (_, k) => rollDie(dieOf(prev.hpRolls.length + k))),
       ],
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choices.hpMethod, need, hp.hitDie])
+  }, [choices.hpMethod, need, dice.join(',')])
 
-  /** 为 2..level 各投一次生命骰（保留已有结果，只补/重投全部） */
+  /** 为 2..level 各投一次生命骰，每级用该级所属职业的骰子 */
   function rollAll() {
     update({
       hpMethod: 'roll',
-      hpRolls: Array.from({ length: Math.max(0, choices.level - 1) }, () => rollDie(hp.hitDie)),
+      hpRolls: Array.from({ length: need }, (_, i) => rollDie(dieOf(i))),
     })
   }
   function rerollOne(i: number) {
     update(prev => {
       const rolls = [...prev.hpRolls]
-      rolls[i] = rollDie(hp.hitDie)
+      rolls[i] = rollDie(dieOf(i))
       return { hpRolls: rolls }
     })
   }
@@ -935,8 +1161,9 @@ function HpBlock({
       </div>
 
       <div className="meta">
-        1级取生命骰最大值 D{hp.hitDie} = {hp.hitDie}，之后每级
-        {choices.hpMethod === 'roll' ? ` 投 1d${hp.hitDie}` : ` 取平均 ${perLevelAvg}`}
+        1级取起始职业生命骰最大值 D{hp.hitDie} = {hp.hitDie}，之后每级
+        {choices.hpMethod === 'roll' ? ' 投该级职业的生命骰' : ' 取该级职业生命骰的平均值'}
+        {multiDie && '（兼职职业从其第一级起就按升级计算，不取最大值）'}
         ，每级再加体质调整值 {fmtMod(conMod)}
         {hp.bonusPerLevel > 0 && `，另有每级 +${hp.bonusPerLevel}（种族/专长）`}
         {choices.hpMethod === 'manual' && '（手动模式下不叠加任何加成）'}
@@ -948,16 +1175,16 @@ function HpBlock({
             <button className="btn small" onClick={rollAll}>🎲 全部重投</button>
             <span className="meta">点单个骰值可单独重投</span>
           </div>
-          {choices.level > 1 && (
+          {need > 0 && (
             <div className="chip-row">
-              {Array.from({ length: choices.level - 1 }, (_, i) => (
+              {Array.from({ length: need }, (_, i) => (
                 <button
                   key={i}
                   className="chip small"
-                  title={`${i + 2} 级，点击重投`}
+                  title={`第 ${i + 2} 级，d${dieOf(i)}，点击重投`}
                   onClick={() => rerollOne(i)}
                 >
-                  {i + 2}级 {choices.hpRolls[i] ?? perLevelAvg}
+                  {i + 2}级{multiDie ? `·d${dieOf(i)}` : ''} {choices.hpRolls[i] ?? hpPerLevelAverage(dieOf(i))}
                 </button>
               ))}
             </div>
@@ -1052,7 +1279,8 @@ type PageState = FeatPage | 'loading' | `err:${string}`
 export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
   const cls = loaded.cls
   const bg = loaded.background
-  const slots = featSlots(cls, choices.level)
+  // 兼职时各职业按自己的等级给槽位
+  const slots = allFeatSlots(choices, loaded)
 
   const core = book.index.featPages.find(g => g.group === '核心专长')?.entries ?? []
   const originUrl = core.find(e => /起源/.test(e.title))?.url ?? ''
@@ -1190,7 +1418,7 @@ export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
         )
       })}
       {cls && slots.length === 0 && (
-        <p className="meta">当前等级（{choices.level}）尚无升级专长槽位（首个在 4 级）。</p>
+        <p className="meta">当前职业等级尚无升级专长槽位（各职业首个通常在该职业 4 级）。</p>
       )}
     </Section>
   )
@@ -1205,10 +1433,18 @@ export function SpellPanel({
   const [filter, setFilter] = useState('')
   const cls = loaded.cls
   const spellList = loaded.spellList
-  const row = cls?.levels.find(r => r.level === choices.level)
+  const inst = classInstances(choices, loaded)
+  // 兼职时按兼职施法者表合算法术位；契约魔法单列
+  const slotInfo = spellSlotsFor(inst)
+  // 每个职业在自己的等级上的戏法/准备法术名额（规则：法术准备按职业分别决定）
+  const quotaRows = inst
+    .map(i => ({ i, row: i.cls.levels.find(r => r.level === i.level) }))
+    .filter(x => x.row && (x.row.cantrips != null || x.row.preparedSpells != null))
+  const sumOrNull = (vals: (number | undefined)[]) =>
+    vals.some(v => v != null) ? vals.reduce<number>((n, v) => n + (v ?? 0), 0) : null
   // 特性赋予的法术（种族/子职/专长），不占名额
   const granted = useMemo(() => grantedSpells(choices, loaded), [choices, loaded])
-  const hasSlots = !!row && (!!row.slots || (row.pactSlots?.count ?? 0) > 0)
+  const hasSlots = Object.keys(slotInfo.slots).length > 0 || !!slotInfo.pact
 
   const byRing = useMemo(() => {
     if (!spellList) return []
@@ -1231,19 +1467,17 @@ export function SpellPanel({
   if (!cls || (!hasSlots && !hasSpells && granted.length === 0)) return null
 
   const slotChips: string[] = []
-  if (row?.slots) {
-    for (const [lv, n] of Object.entries(row.slots)) slotChips.push(`${lv}环 ×${n}`)
-  }
-  if (row?.pactSlots && row.pactSlots.count > 0) {
-    slotChips.push(`魔契法术位 ${row.pactSlots.level}环 ×${row.pactSlots.count}（短休回复）`)
+  for (const [lv, n] of Object.entries(slotInfo.slots)) slotChips.push(`${lv}环 ×${n}`)
+  if (slotInfo.pact) {
+    slotChips.push(`魔契法术位 ${slotInfo.pact.level}环 ×${slotInfo.pact.count}（短休回复）`)
   }
 
   // 名额：戏法与准备法术分开计数，取自职业等级表；已满时禁止再选（取消始终允许）
   const isCantrip = (name: string) => spellList?.spells.find(s => s.name === name)?.ring === 0
   const chosenCantrips = choices.spells.filter(isCantrip).length
   const chosenLeveled = choices.spells.length - chosenCantrips
-  const maxCantrips = row?.cantrips ?? null
-  const maxPrepared = row?.preparedSpells ?? null
+  const maxCantrips = sumOrNull(quotaRows.map(x => x.row!.cantrips))
+  const maxPrepared = sumOrNull(quotaRows.map(x => x.row!.preparedSpells))
   const grantedNames = new Set(granted.map(g => g.name))
 
   function quotaFull(name: string): boolean {
@@ -1262,18 +1496,37 @@ export function SpellPanel({
   return (
     <Section step="五" title="法术" hint="法术列表来自速查，覆盖全部扩展书">
       <div className="kv-grid">
-        {slotChips.length > 0 && (<><span>法术位</span><b>{slotChips.join('，')}</b></>)}
-        {row?.cantrips != null && (
-          <><span>戏法</span><b className={chosenCantrips > row.cantrips ? 'warn' : ''}>
-            已选 {chosenCantrips} / {row.cantrips}
+        {slotChips.length > 0 && (
+          <><span>法术位</span><b>
+            {slotChips.join('，')}
+            {slotInfo.mode === 'multi' && `（兼职施法者等级 ${slotInfo.casterLevel}）`}
           </b></>
         )}
-        {row?.preparedSpells != null && (
-          <><span>准备法术</span><b className={chosenLeveled > row.preparedSpells ? 'warn' : ''}>
-            已选 {chosenLeveled} / {row.preparedSpells}
+        {maxCantrips != null && (
+          <><span>戏法</span><b className={chosenCantrips > maxCantrips ? 'warn' : ''}>
+            已选 {chosenCantrips} / {maxCantrips}
           </b></>
         )}
-        {cls.spellAbility && (<><span>施法属性</span><b>{ABILITY_CN[cls.spellAbility]}</b></>)}
+        {maxPrepared != null && (
+          <><span>准备法术</span><b className={chosenLeveled > maxPrepared ? 'warn' : ''}>
+            已选 {chosenLeveled} / {maxPrepared}
+          </b></>
+        )}
+        {quotaRows.length > 1 && (
+          <><span>名额来源</span><b>
+            {quotaRows.map(({ i, row }) =>
+              `${i.cls.nameCn}${i.level}：戏法 ${row!.cantrips ?? 0}、准备 ${row!.preparedSpells ?? 0}`
+            ).join('；')}
+          </b></>
+        )}
+        {inst.some(i => i.cls.spellAbility) && (
+          <><span>施法属性</span><b>
+            {/* 兼职时每个职业的法术用该职业自己的施法属性 */}
+            {inst.filter(i => i.cls.spellAbility)
+              .map(i => `${ABILITY_CN[i.cls.spellAbility!]}${inst.length > 1 ? `（${i.cls.nameCn}）` : ''}`)
+              .join('、')}
+          </b></>
+        )}
         {choices.spells.length > 0 && (<><span>已选法术</span><b>{choices.spells.length} 个</b></>)}
       </div>
 

@@ -186,6 +186,8 @@ export interface ClassData {
   armorTraining: string
   equipmentOptions: string[]
   spellAbility: AbilityKey | null
+  /** 「作为兼职角色」段原文：兼职时获得的部分熟练，第三方职业还含兼职先决 */
+  multiclassText: string
   levels: ClassLevelRow[]
   subclasses: SubclassData[]
 }
@@ -223,13 +225,20 @@ export interface FeatPage {
   feats: TraitEntry[]
 }
 
-/** 当前选中并已解析完成的实体集合 */
-export interface LoadedEntities {
+/** 兼职职业对应的已解析实体（与 CharacterChoices.multiclasses 一一对应） */
+export interface LoadedMulticlass {
   cls: ClassData | null
   subclass: SubclassData | null
+}
+
+/** 当前选中并已解析完成的实体集合 */
+export interface LoadedEntities {
+  cls: ClassData | null // 起始职业
+  subclass: SubclassData | null // 起始职业的子职
   species: SpeciesData | null
   background: BackgroundData | null
   spellList: SpellList | null
+  multiclasses: LoadedMulticlass[]
 }
 
 // ---------- 车卡过程中的用户选择 ----------
@@ -239,12 +248,22 @@ export type AbilityMethod = 'array' | 'pointbuy' | 'roll' | 'custom'
 /** 生命值取值方式：固定平均值 / 逐级投骰 / 手动指定 */
 export type HpMethod = 'average' | 'roll' | 'manual'
 
+/** 一个兼职职业（起始职业仍由 classUrl/subclassUrl 表示） */
+export interface MulticlassPick {
+  classUrl: string
+  subclassUrl: string
+  level: number // 该职业的等级
+  skill: SkillKey | null // 兼职时该职业提供的一项自选技能（若有）
+}
+
 export interface CharacterChoices {
   name: string
   alignment: string
   level: number
-  classUrl: string // 仓库内页面路径，即 TOC 索引中的 url
+  classUrl: string // 起始职业：仓库内页面路径，即 TOC 索引中的 url
   subclassUrl: string
+  /** 兼职职业。level 为角色总等级，起始职业等级 = level − Σ兼职等级 */
+  multiclasses: MulticlassPick[]
   speciesUrl: string
   subraceChoice: string // 亚种名称（种族无亚种时为空）
   sizeChoice: string

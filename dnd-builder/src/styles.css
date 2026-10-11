@@ -679,3 +679,21 @@ textarea:focus {
   border: 1px solid var(--panel-border);
   border-radius: 6px;
 }
+
+/* ---------- 兼职 ---------- */
+
+.multiclass {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--panel-border);
+}
+
+.mc-row {
+  margin: 6px 0 10px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--gold);
+}
+
+.mc-picker {
+  margin-top: 6px;
+}

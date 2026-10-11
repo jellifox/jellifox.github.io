@@ -90,12 +90,16 @@ async function loadEntity<T>(
   const key = `${kind}:${url}`
   if (inflight.has(key)) return inflight.get(key) as Promise<T>
   const p = (async () => {
-    const html = await fetchPage(meta.sha, url)
-    const parsed = parse(html, url)
-    if (!parsed) throw new Error(`页面解析失败：${url}`)
-    entityCachePut(meta.sha, meta.branch, kind, url, parsed)
-    inflight.delete(key)
-    return parsed
+    try {
+      const html = await fetchPage(meta.sha, url)
+      const parsed = parse(html, url)
+      if (!parsed) throw new Error(`页面解析失败：${url}`)
+      entityCachePut(meta.sha, meta.branch, kind, url, parsed)
+      return parsed
+    } finally {
+      // 成功或失败都要清除：否则失败的 Promise 会留在表里，本次会话内重试永远拿到同一个失败
+      inflight.delete(key)
+    }
   })()
   inflight.set(key, p)
   return p as Promise<T>
@@ -132,8 +136,9 @@ export function loadFeatPageEntity(meta: RepoMeta, url: string, title: string): 
 export async function loadSpellListEntity(
   meta: RepoMeta,
   urls: string[],
-  classTitle: string
+  classTitles: string | string[]
 ): Promise<SpellList> {
+  const titles = Array.isArray(classTitles) ? classTitles : [classTitles]
   const pages = await Promise.all(
     urls.map(u =>
       loadEntity(meta, 'spelllist', u, html => {
@@ -143,16 +148,16 @@ export async function loadSpellListEntity(
     )
   )
   const all = pages.flatMap(p => p?.spells ?? [])
-  // 职业名可能带书名后缀（如「法师」「奇械师EFA」），取速查表职业名作为包含判据
-  const name = classTitle.replace(/[（(].*$/, '').trim()
-  const mine = all.filter(s => s.classes.some(c => name.includes(c) || c.includes(name)))
+  // 职业名可能带书名后缀（如「奇械师EFA」），取速查表职业名作为包含判据；兼职时取各职业法术的并集
+  const names = titles.map(t => t.replace(/[（(].*$/, '').trim())
+  const mine = all.filter(s => s.classes.some(c => names.some(n => n.includes(c) || c.includes(n))))
   // 该职业在总表中无条目（非施法职业或名称对不上）时返回全表，交由界面自行取舍
   const spells = mine.length > 0 ? mine : []
   // 同名法术可能在两份总表里重复，按名称去重
   const seen = new Set<string>()
   const allSeen = new Set<string>()
   return {
-    classTitle,
+    classTitle: titles.join(' / '),
     spells: spells.filter(s => (seen.has(s.name) ? false : (seen.add(s.name), true))),
     all: all.filter(s => (allSeen.has(s.name) ? false : (allSeen.add(s.name), true))),
   }
