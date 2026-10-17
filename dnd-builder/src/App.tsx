@@ -8,7 +8,7 @@ import { buildStatblock } from './rules/statblock'
 import { isThirdCasterSubclass } from './rules/multiclass'
 import { DEFAULT_CHOICES, DRAFT_KEY, loadDraft } from './state/draft'
 import {
-  AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SpellPanel,
+  AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SkillPanel, SpellPanel,
 } from './components/panels'
 import { SheetPane } from './components/sheet'
 
@@ -262,6 +262,7 @@ export default function App() {
                 loaded={loaded}
                 flags={flags}
               />
+              <SkillPanel choices={choices} update={update} loaded={loaded} />
               <GearPanel choices={choices} update={update} loaded={loaded} />
               <SpellPanel choices={choices} update={update} loaded={loaded} flags={flags} />
             </>

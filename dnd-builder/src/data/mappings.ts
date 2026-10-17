@@ -41,7 +41,7 @@ export function cnToAbilities(text: string): AbilityKey[] {
 }
 
 // 技能：2024 译名 + 常见旧译名别名
-const SKILL_ALIASES: Record<SkillKey, string[]> = {
+export const SKILL_ALIASES: Record<SkillKey, string[]> = {
   acrobatics: ['特技', '体操', '杂技'],
   animal_handling: ['驯兽', '驯养动物', '动物驯养'],
   arcana: ['奥秘'],

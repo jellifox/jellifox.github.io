@@ -283,6 +283,10 @@ export interface CharacterChoices {
   rolledSets: number[][] // 投骰生成的 5 组候选数组
   rollSetIndex: number // 当前选用的组索引（-1 表示未选）
   classSkills: SkillKey[]
+  /** 种族/专长自选技能：SkillChoice.key -> 所选技能 */
+  skillPicks: Record<string, SkillKey[]>
+  /** 专精技能（须已熟练；超出名额的保留但不生效） */
+  expertise: SkillKey[]
   classEquipChoice: number
   bgEquipChoice: number
   armorId: string

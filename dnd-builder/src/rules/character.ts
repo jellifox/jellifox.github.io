@@ -6,7 +6,7 @@
 import type {
   AbilityKey, CharacterChoices, LoadedEntities, SkillKey, SpellEntry, TraitEntry,
 } from '../types'
-import { cnToSkill } from '../data/mappings'
+import { SKILL_ABILITY, SKILL_KEYS, cnToSkill } from '../data/mappings'
 import { subclassFeatureLevel } from '../data/parsers'
 import {
   activeFeats, allFeatSlots, deriveAbilities, deriveHp, effectiveSubrace,
@@ -21,6 +21,7 @@ import {
   weaponProficient, type ArmorDef, type WeaponDef,
 } from './rules'
 import { grantedSpells, type GrantedSpell } from './spells'
+import { expertiseSources, pickedSkills, skillChoices, type SkillChoice } from './skills'
 import { classResources, type ClassResources } from './resources'
 
 export interface FeatEntry {
@@ -78,6 +79,16 @@ export interface DerivedCharacter {
   armorNotes: string[]
   saves: AbilityKey[]
   profSkills: Set<SkillKey>
+  /** 种族/专长里的自选技能熟练 */
+  skillChoices: SkillChoice[]
+  expertiseSources: { source: string; count: number }[]
+  expertiseCount: number
+  /** 生效的专精技能 */
+  expertise: SkillKey[]
+  /** 万事通：非熟练技能加一半熟练加值 */
+  jack: boolean
+  skillBonus: Record<SkillKey, number>
+  initiative: number
   passivePerception: number
   profs: ProficiencySummary
   slots: SlotResult
@@ -126,6 +137,8 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     ...(c.multiclasses ?? []).map(m => m.skill).filter((x): x is SkillKey => !!x),
     ...traitSkills(spTraits),
   ])
+  const choicesOfSkills = skillChoices(c, loaded)
+  for (const s of pickedSkills(choicesOfSkills, c.skillPicks)) profSkills.add(s)
 
   // ---- 专长：起源 + 仍存在的升级槽位 ----
   const live = activeFeats(c, loaded)
@@ -222,6 +235,17 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
       }
     })
 
+  // ---- 技能：专精、万事通、先攻 ----
+  const expSources = expertiseSources(instances, Object.values(live))
+  const expertiseCount = expSources.reduce((n, s) => n + s.count, 0)
+  const expertise = (c.expertise ?? []).filter(s => profSkills.has(s)).slice(0, expertiseCount)
+  const jack = gained.some(g => g.names.includes('万事通'))
+  const skillBonus = Object.fromEntries(SKILL_KEYS.map(s => {
+    const prof = expertise.includes(s) ? 2 * pb : profSkills.has(s) ? pb : jack ? Math.floor(pb / 2) : 0
+    return [s, mods[SKILL_ABILITY[s]] + prof]
+  })) as Record<SkillKey, number>
+  const initiative = mods.DEX + (hasFeat(/^警戒|Alert/) ? pb : 0)
+
   // ---- 护甲等级：可用公式取最高（兼职时多个无甲防御也只能取其一） ----
   const armorNotes: string[] = []
   const trained = armorTrained(armor, profs)
@@ -290,7 +314,14 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     // 豁免熟练只来自起始职业（兼职规则）
     saves: cls?.saves ?? [],
     profSkills,
-    passivePerception: 10 + abilities.mods.WIS + (profSkills.has('perception') ? pb : 0),
+    skillChoices: choicesOfSkills,
+    expertiseSources: expSources,
+    expertiseCount,
+    expertise,
+    jack,
+    skillBonus,
+    initiative,
+    passivePerception: 10 + skillBonus.perception,
     profs,
     slots: spellSlotsFor(instances),
     casters: instances

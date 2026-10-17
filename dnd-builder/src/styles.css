@@ -702,3 +702,11 @@ textarea:focus {
 .mc-picker {
   margin-top: 6px;
 }
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 12px;
+  margin-top: 10px;
+  font-size: 13px;
+}

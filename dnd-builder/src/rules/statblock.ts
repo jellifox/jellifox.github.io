@@ -3,7 +3,7 @@
 import type {
   Action, CharacterChoices, E5Statblock, LoadedEntities, RepoMeta, Skills, SpellSlots,
 } from '../types'
-import { ABILITY_CN, ABILITY_FULL_EN, SIZE_CN_TO_EN, SKILL_ABILITY } from '../data/mappings'
+import { ABILITY_CN, ABILITY_FULL_EN, SIZE_CN_TO_EN, SKILL_CN, SKILL_KEYS } from '../data/mappings'
 import { deriveCharacter } from './character'
 import { classSummary, hitDiceLabel } from './multiclass'
 import { fmtMod } from './rules'
@@ -23,8 +23,11 @@ export function buildStatblock(
     savingThrows[`${ABILITY_FULL_EN[k]}_save` as keyof typeof savingThrows] = ab.mods[k] + pb
   }
 
+  // 熟练/专精技能；有万事通时非熟练技能也列出（加一半熟练加值）
   const skills: Skills = {}
-  for (const s of d.profSkills) skills[s] = ab.mods[SKILL_ABILITY[s]] + pb
+  for (const s of SKILL_KEYS) {
+    if (d.profSkills.has(s) || d.jack) skills[s] = d.skillBonus[s]
+  }
 
   // 感官：种族特质里的黑暗视觉
   const senses: string[] = []
@@ -39,6 +42,15 @@ export function buildStatblock(
   for (const f of d.feats) {
     const tag = f.kind === 'origin' ? '起源专长' : f.kind === 'general' ? `${f.tag}专长` : f.tag
     specials.push({ name: `【${tag}】${f.name}`, desc: f.desc })
+  }
+  if (d.initiative !== ab.mods.DEX || d.expertise.length) {
+    specials.push({
+      name: '【先攻与专精】',
+      desc: [
+        `先攻 ${fmtMod(d.initiative)}`,
+        d.expertise.length ? `专精：${d.expertise.map(s => SKILL_CN[s]).join('、')}` : '',
+      ].filter(Boolean).join('；'),
+    })
   }
   if (d.resources.values.length) {
     specials.push({

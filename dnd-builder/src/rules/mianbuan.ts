@@ -89,8 +89,10 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
   }
   const skills: Record<string, ProfDerived> = {}
   for (const [sk, mb] of Object.entries(SKILL_TO_MIANBUAN) as [SkillKey, string][]) {
-    const isProf = d.profSkills.has(sk)
-    skills[mb] = profDerived(isProf ? 1 : 0, ab.mods[SKILL_ABILITY[sk]] + (isProf ? pb : 0))
+    const prof = d.expertise.includes(sk) ? 2 : d.profSkills.has(sk) ? 1 : 0
+    // 面团按 调整值 + prof×熟练加值 自动计算；万事通的半熟练它算不出来，标记为手动覆盖
+    const auto = ab.mods[SKILL_ABILITY[sk]] + prof * pb
+    skills[mb] = { prof, value: d.skillBonus[sk], overridden: d.skillBonus[sk] !== auto }
   }
 
   // ---- 武器攻击（面团固定 6 行） ----
@@ -211,7 +213,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
       savingThrows,
       modifiers,
       skills,
-      initiative: derived(ab.mods.DEX),
+      initiative: { value: d.initiative, overridden: d.initiative !== ab.mods.DEX },
       passivePerception: derived(d.passivePerception),
       weapons,
       classFeatures: structuredBlock(classItems),
