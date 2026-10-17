@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  casterType, classInstances, hitDiceLabel, multiclassProfs, parsePrereq, prereqOf,
-  spellSlotsFor, unmetPrereq,
+  casterType, classInstances, hitDiceLabel, maxPreparableRing, multiclassProfs, parsePrereq,
+  prereqOf, spellPreparable, spellSlotsFor, unmetPrereq,
 } from './multiclass'
-import { choices, eldritchKnight, fighter, loaded, mc, paladin, sorcerer } from '../test/fixtures'
+import { choices, eldritchKnight, fighter, loaded, mc, paladin, sorcerer, spells } from '../test/fixtures'
 import type { AbilityKey } from '../types'
 
 const scores = (o: Partial<Record<AbilityKey, number>>) =>
@@ -60,5 +60,30 @@ describe('兼职熟练', () => {
   })
   it('术士兼职只给生命骰', () => {
     expect(multiclassProfs(sorcerer)).toMatchObject({ weapons: '', light: false, shield: false, skillChoices: null })
+  })
+})
+
+describe('可准备的法术环阶', () => {
+  const find = (n: string) => spells.find(s => s.name.startsWith(n))!
+
+  it('术士 1 级只到一环；兼职时各职业按自己的等级判断', () => {
+    const one = classInstances(choices({ level: 1, classUrl: 's' }), loaded({ cls: sorcerer }))
+    expect(maxPreparableRing(one[0])).toBe(1)
+    expect(spellPreparable(find('火焰箭'), one)).toBe(true)
+    expect(spellPreparable(find('迷踪步'), one)).toBe(false) // 二环
+
+    // 术士4/圣武士1：法术位有三环，但术士 4 级只能准备到二环，圣武士 1 级只到一环
+    const c = choices({ level: 5, classUrl: 's', multiclasses: [{ classUrl: 'p', subclassUrl: '', level: 1, skill: null }] })
+    const inst = classInstances(c, loaded({ cls: sorcerer, multiclasses: mc('p', paladin) }))
+    expect(inst.map(maxPreparableRing)).toEqual([2, 1])
+    expect(spellPreparable(find('迷踪步'), inst)).toBe(true)
+  })
+
+  it('奥法骑士用法师列表：3 级一环、7 级二环', () => {
+    const at = (lv: number) => classInstances(choices({ level: lv, classUrl: 'f' }), loaded({ cls: fighter, subclass: eldritchKnight }))[0]
+    expect(maxPreparableRing(at(2))).toBe(-1)
+    expect(maxPreparableRing(at(3))).toBe(1)
+    expect(maxPreparableRing(at(7))).toBe(2)
+    expect(spellPreparable(find('护盾术'), [at(3)])).toBe(true) // 法师法术
   })
 })

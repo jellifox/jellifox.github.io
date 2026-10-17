@@ -40,6 +40,13 @@ export function buildStatblock(
     const tag = f.kind === 'origin' ? '起源专长' : f.kind === 'general' ? `${f.tag}专长` : f.tag
     specials.push({ name: `【${tag}】${f.name}`, desc: f.desc })
   }
+  if (d.resources.values.length) {
+    specials.push({
+      name: '【职业数值】',
+      desc: d.resources.values
+        .map(v => `${v.name}：${v.value}${d.multiclassed ? `（${v.className}）` : ''}`).join('\n'),
+    })
+  }
   for (const g of d.classFeatures) {
     if (g.byLevel.length) {
       specials.push({
@@ -136,6 +143,7 @@ export function buildStatblock(
     spell_slots: spellSlots,
     spells: d.spells.filter(s => !s.source).map(s => s.name),
     spell_dc: spellDc,
+    limits: d.resources.limits,
     spell_attack: spellAttack,
     challenge_rating: null,
     cr: null,

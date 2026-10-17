@@ -6,7 +6,7 @@
 // 因此一律经由 classInstances() 取得。
 
 import type {
-  AbilityKey, CharacterChoices, ClassData, LoadedEntities, SkillKey, SubclassData,
+  AbilityKey, CharacterChoices, ClassData, LoadedEntities, SkillKey, SpellEntry, SubclassData,
 } from '../types'
 import { ABILITY_CN } from '../data/mappings'
 
@@ -274,6 +274,50 @@ export function spellSlotsFor(instances: ClassInstance[]): SlotResult {
   const slots: Partial<Record<number, number>> = {}
   ;(MULTICLASS_SLOTS[lv] ?? []).forEach((n, idx) => { if (n) slots[idx + 1] = n })
   return { slots, pact, mode: casters.length === 1 ? 'single' : 'multi', casterLevel: lv }
+}
+
+// ---------- 可准备的法术环阶 ----------
+
+/**
+ * 该职业在其当前等级能准备的最高法术环阶：0 = 只有戏法，-1 = 尚不能施法。
+ * 规则：兼职时法术位可以合算，但「能准备什么环阶」仍按各职业自己的等级判断
+ * （如游侠4/术士3 有三环法术位，却不能准备三环法术）。
+ */
+export function maxPreparableRing(inst: ClassInstance): number {
+  const t = casterType(inst)
+  const row = inst.cls.levels.find(r => r.level === inst.level)
+  const hasCantrips = (row?.cantrips ?? 0) > 0
+  if (t === 'pact') {
+    return row?.pactSlots?.count ? row.pactSlots.level : hasCantrips ? 0 : -1
+  }
+  if (t === 'full' || t === 'half') {
+    const rings = Object.keys(row?.slots ?? {}).map(Number)
+    return rings.length ? Math.max(...rings) : hasCantrips ? 0 : -1
+  }
+  if (t === 'third') {
+    // 奥法骑士/诡术师 3 级起施法；自身法术位表等价于施法者等级 ⌈等级/3⌉
+    if (casterLevelContribution(t, inst.level) === 0) return -1
+    return (MULTICLASS_SLOTS[Math.ceil(inst.level / 3)] ?? []).length
+  }
+  return -1
+}
+
+/** 法术速查里该职业的名称；三分之一施法者用法师法术列表 */
+export function spellListClassName(inst: ClassInstance): string {
+  return casterType(inst) === 'third' ? '法师' : inst.cls.nameCn.replace(/[（(].*$/, '').trim()
+}
+
+/**
+ * 法术能否被当前角色准备：某个职业的法术列表含有它，且它的环阶不高于该职业的上限。
+ * 职业名按包含关系匹配（与法术表加载时的筛选一致，如「奇械师EFA」对「奇械师」）。
+ */
+export function spellPreparable(spell: SpellEntry, instances: ClassInstance[]): boolean {
+  return instances.some(inst => {
+    const max = maxPreparableRing(inst)
+    if (max < 0 || spell.ring > max) return false
+    const n = spellListClassName(inst)
+    return spell.classes.some(c => n.includes(c) || c.includes(n))
+  })
 }
 
 // ---------- 生命骰 ----------

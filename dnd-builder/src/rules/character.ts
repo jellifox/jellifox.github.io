@@ -21,6 +21,7 @@ import {
   type ArmorDef, type WeaponDef,
 } from './rules'
 import { grantedSpells, type GrantedSpell } from './spells'
+import { classResources, type ClassResources } from './resources'
 
 export interface FeatEntry {
   /** 'origin' 或升级槽位的类别 */
@@ -78,6 +79,8 @@ export interface DerivedCharacter {
   granted: GrantedSpell[]
   spells: SpellPick[]
   weapons: WeaponAttack[]
+  /** 职业资源（写入 limits）与职业数值 */
+  resources: ClassResources
   equipment: string[]
   sizeCn: string
   speed: number
@@ -205,6 +208,7 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     granted,
     spells,
     weapons,
+    resources: classResources(instances, abilities.mods),
     equipment,
     sizeCn: c.sizeChoice || species?.sizeOptions[0] || '中型',
     speed: species?.speed || 30,

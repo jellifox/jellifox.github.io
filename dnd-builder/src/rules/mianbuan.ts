@@ -124,6 +124,18 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
     }
   }
 
+  // 职业资源与数值：面团没有专门的资源栏，作为职业特性条目列出
+  for (const l of d.resources.limits) {
+    classItems.push({
+      name: `${l.name} ×${l.uses}`,
+      level: '资源',
+      detail: [`恢复：${(l.resets ?? []).join('、')}`, l.description].filter(Boolean).join('；'),
+    })
+  }
+  for (const v of d.resources.values) {
+    classItems.push({ name: `${v.name}：${v.value}`, level: d.multiclassed ? v.className : '数值', detail: '' })
+  }
+
   // ---- 施法 / 法术位：面团只有一个施法属性栏，取第一个施法职业的 ----
   const spellAb = d.casters[0]?.ability ?? null
   const spellMod = spellAb ? ab.mods[spellAb] : null

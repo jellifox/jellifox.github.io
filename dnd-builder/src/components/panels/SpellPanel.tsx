@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { ABILITY_CN } from '../../data/mappings'
-import { classInstances, spellAbilityOf, spellSlotsFor } from '../../rules/multiclass'
+import {
+  classInstances, maxPreparableRing, spellAbilityOf, spellPreparable, spellSlotsFor,
+} from '../../rules/multiclass'
 import { grantedSpells } from '../../rules/spells'
 import { EntityStatus, Section, type PanelProps } from '../ui'
 
@@ -30,10 +32,18 @@ export function SpellPanel({
   const granted = useMemo(() => grantedSpells(choices, loaded), [choices, loaded])
   const hasSlots = Object.keys(slotInfo.slots).length > 0 || !!slotInfo.pact
 
+  // 可准备的最高环阶：各职业按自己的等级算，取其中最高者决定显示到哪一环
+  const maxRing = Math.max(-1, ...inst.map(maxPreparableRing))
+  const byName = new Map((spellList?.spells ?? []).map(sp => [sp.name, sp]))
+  const preparable = (name: string) => {
+    const sp = byName.get(name)
+    return !sp || spellPreparable(sp, inst)
+  }
+
   const byRing = useMemo(() => {
     if (!spellList) return []
     const groups: { ring: number; spells: typeof spellList.spells }[] = []
-    for (let r = 0; r <= 9; r++) {
+    for (let r = 0; r <= Math.max(0, maxRing); r++) {
       const list = spellList.spells.filter(
         s =>
           s.ring === r &&
@@ -44,7 +54,7 @@ export function SpellPanel({
       if (list.length) groups.push({ ring: r, spells: list })
     }
     return groups
-  }, [spellList, filter])
+  }, [spellList, filter, maxRing])
 
   // 空法术表视同没有（非施法职业在总表里没有条目）
   const hasSpells = (spellList?.spells.length ?? 0) > 0
@@ -69,10 +79,13 @@ export function SpellPanel({
     return maxPrepared != null && chosenLeveled >= maxPrepared
   }
 
+  // 已选但不可准备的法术（如降级后）：保留并标红，允许取消
+  const overRing = choices.spells.filter(n => !preparable(n))
+
   function toggleSpell(name: string) {
     update(prev => {
       if (prev.spells.includes(name)) return { spells: prev.spells.filter(s => s !== name) }
-      if (quotaFull(name)) return {}
+      if (quotaFull(name) || !preparable(name)) return {}
       return { spells: [...prev.spells, name] }
     })
   }
@@ -111,8 +124,25 @@ export function SpellPanel({
               .join('、')}
           </b></>
         )}
+        {maxRing >= 0 && (
+          <><span>可准备至</span><b>{RING_NAMES[maxRing]}{inst.length > 1 && '（兼职时每个法术按其所属职业的等级判断）'}</b></>
+        )}
         {choices.spells.length > 0 && (<><span>已选法术</span><b>{choices.spells.length} 个</b></>)}
       </div>
+      {overRing.length > 0 && (
+        <>
+          <p className="meta warn">
+            以下已选法术超出当前可准备的环阶（可能是降级或改了职业），点击取消：
+          </p>
+          <div className="chip-row">
+            {overRing.map(n => (
+              <button key={n} className="chip small active warn" onClick={() => toggleSpell(n)}>
+                {n} ×
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <EntityStatus flag={flags.spellList} />
 
@@ -157,12 +187,14 @@ export function SpellPanel({
                       key={s.name + s.source}
                       className={`chip small ${choices.spells.includes(s.name) ? 'active' : ''} ${
                         grantedNames.has(s.name) ? 'granted' : ''
-                      }`}
-                      disabled={!choices.spells.includes(s.name) && quotaFull(s.name)}
+                      } ${choices.spells.includes(s.name) && !spellPreparable(s, inst) ? 'warn' : ''}`}
+                      disabled={!choices.spells.includes(s.name) && (quotaFull(s.name) || !spellPreparable(s, inst))}
                       title={
                         grantedNames.has(s.name)
                           ? `${s.school} · 已由特性赋予，无需占用名额`
-                          : `${s.school}${s.source ? ` · ${s.source}` : ''}`
+                          : !spellPreparable(s, inst)
+                            ? `${s.school} · 你的职业在当前等级还不能准备这一环的此法术`
+                            : `${s.school}${s.source ? ` · ${s.source}` : ''}`
                       }
                       onClick={() => toggleSpell(s.name)}
                     >
