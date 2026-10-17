@@ -1,5 +1,6 @@
 // 自选技能熟练与专精：从种族特质、专长原文里识别「自选一项技能熟练」「X、Y或Z之一」，
 // 以及职业特性（专精、熟练探险家、学者）与专长给出的专精名额。
+// 另含背景工具的具体选择与特性赋予的语言。
 
 import type { CharacterChoices, LoadedEntities, SkillKey, TraitEntry } from '../types'
 import { SKILL_ALIASES, SKILL_KEYS } from '../data/mappings'
@@ -81,5 +82,51 @@ export function expertiseSources(
   for (const f of feats) {
     if (/拥有其熟练但不具备相应\s*专精/.test(f.desc)) out.push({ source: f.name, count: 1 })
   }
+  return out
+}
+
+// ---------- 工具 ----------
+
+/** 2024 玩家手册的工具变体（名称取自不全书「其他工具」「工匠工具」页） */
+export const TOOL_GROUPS: Record<string, string[]> = {
+  赌具: ['骰子', '龙棋', '纸牌', '三龙牌'],
+  乐器: ['风笛', '鼓', '扬琴', '长笛', '号角', '鲁特琴', '里拉琴', '排箫', '芦笛', '提琴'],
+  工匠工具: [
+    '炼金工具', '酿酒工具', '书法工具', '木匠工具', '制图工具', '鞋匠工具', '厨师工具', '玻璃匠工具',
+    '珠宝匠工具', '皮匠工具', '石匠工具', '画家工具', '陶匠工具', '铁匠工具', '修补工具', '织布工具', '木雕工具',
+  ],
+}
+
+/** 背景工具若是「选择一种赌具」之类，返回可选项；固定工具返回 null */
+export function toolOptions(text: string): string[] | null {
+  if (!/选择|任选|自选|一种/.test(text)) return null
+  const opts = Object.entries(TOOL_GROUPS).filter(([g]) => text.includes(g)).flatMap(([, v]) => v)
+  return opts.length ? opts : null
+}
+
+// ---------- 语言 ----------
+
+/** 2024：通用语 + 自选 2 种 */
+export const LANGUAGE_PICKS = 2
+
+const LANG_TOKEN = /(?:^|[、，,和写及与：:\s解])([\u4e00-\u9fa5]{1,4}?语)(?=[（(、，,。和及与\s]|$)/g
+
+/** 种族「语言」段与职业特性（盗贼黑话、德鲁伊语）直接给的语言 */
+export function grantedLanguages(languageText: string, featureNames: string[], known: string[]): string[] {
+  const out: string[] = []
+  const add = (raw: string) => {
+    // 对齐到语言表里的完整名称（「德鲁伊语」→「德鲁伊语Druidic」）
+    const name = known.find(k => k.startsWith(raw)) ?? raw
+    if (!out.includes(name)) out.push(name)
+  }
+  for (const sentence of languageText.split(/[。\n]/)) {
+    const understandOnly = /理解/.test(sentence) && /不能说|无法说/.test(sentence)
+    for (const m of sentence.matchAll(LANG_TOKEN)) {
+      // 「说、读、写鸟族语」：去掉粘在前面的动词
+      add(m[1].replace(/^[说读写懂会]+/, '') + (understandOnly ? '（仅理解）' : ''))
+    }
+  }
+  if (featureNames.includes('盗贼黑话')) add('盗贼黑话')
+  if (featureNames.includes('德鲁伊语')) add('德鲁伊语')
   return out
 }

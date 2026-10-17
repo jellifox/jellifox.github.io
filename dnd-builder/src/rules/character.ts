@@ -6,7 +6,7 @@
 import type {
   AbilityKey, CharacterChoices, LoadedEntities, SkillKey, SpellEntry, TraitEntry,
 } from '../types'
-import { SKILL_ABILITY, SKILL_KEYS, cnToSkill } from '../data/mappings'
+import { RARE_LANGUAGES, SKILL_ABILITY, SKILL_KEYS, STANDARD_LANGUAGES, cnToSkill } from '../data/mappings'
 import { subclassFeatureLevel } from '../data/parsers'
 import {
   activeFeats, allFeatSlots, deriveAbilities, deriveHp, effectiveSubrace,
@@ -21,7 +21,10 @@ import {
   weaponProficient, type ArmorDef, type WeaponDef,
 } from './rules'
 import { grantedSpells, type GrantedSpell } from './spells'
-import { expertiseSources, pickedSkills, skillChoices, type SkillChoice } from './skills'
+import {
+  LANGUAGE_PICKS, expertiseSources, grantedLanguages, pickedSkills, skillChoices, toolOptions,
+  type SkillChoice,
+} from './skills'
 import { classResources, type ClassResources } from './resources'
 
 export interface FeatEntry {
@@ -89,6 +92,12 @@ export interface DerivedCharacter {
   jack: boolean
   skillBonus: Record<SkillKey, number>
   initiative: number
+  /** 特性直接给的语言（不占自选名额） */
+  grantedLanguages: string[]
+  /** 最终语言：通用语 + 赋予 + 自选（超出名额的不计） */
+  languages: string[]
+  /** 背景工具（已代入具体选择）+ 兼职工具 */
+  tools: string
   passivePerception: number
   profs: ProficiencySummary
   slots: SlotResult
@@ -246,6 +255,16 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
   })) as Record<SkillKey, number>
   const initiative = mods.DEX + (hasFeat(/^警戒|Alert/) ? pb : 0)
 
+  // ---- 语言与工具 ----
+  const langsGranted = grantedLanguages(
+    species?.languageText ?? '', gained.flatMap(g => g.names), [...STANDARD_LANGUAGES, ...RARE_LANGUAGES.map(r => r.name)]
+  )
+  const freeLangs = c.languages.filter(l => l !== '通用语' && !langsGranted.includes(l)).slice(0, LANGUAGE_PICKS)
+  const languages = [...new Set(['通用语', ...langsGranted, ...freeLangs])]
+  const toolOpts = bg ? toolOptions(bg.tool) : null
+  const bgTool = toolOpts?.includes(c.toolChoice) ? c.toolChoice : bg?.tool ?? ''
+  const tools = [bgTool, profs.tools].filter(Boolean).join('、')
+
   // ---- 护甲等级：可用公式取最高（兼职时多个无甲防御也只能取其一） ----
   const armorNotes: string[] = []
   const trained = armorTrained(armor, profs)
@@ -321,6 +340,9 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     jack,
     skillBonus,
     initiative,
+    grantedLanguages: langsGranted,
+    languages,
+    tools,
     passivePerception: 10 + skillBonus.perception,
     profs,
     slots: spellSlotsFor(instances),

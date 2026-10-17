@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { expertiseSources, skillChoicesIn } from './skills'
+import { expertiseSources, grantedLanguages, skillChoicesIn, toolOptions } from './skills'
 import { deriveCharacter } from './character'
 import { choices, corvum, elf, generalFeats, loaded, sorcerer } from '../test/fixtures'
 
@@ -46,5 +46,25 @@ describe('deriveCharacter 技能', () => {
     const d = deriveCharacter(choices({ level: 5, classUrl: 's', classSkills: ['arcana'], expertise: ['arcana'] }), loaded({ cls: sorcerer }))
     expect(d.expertiseCount).toBe(0)
     expect(d.skillBonus.arcana).toBe(3)
+  })
+})
+
+describe('工具与语言', () => {
+  it('toolOptions', () => {
+    expect(toolOptions('选择一种赌具')).toEqual(['骰子', '龙棋', '纸牌', '三龙牌'])
+    expect(toolOptions('书法工具')).toBeNull()
+  })
+
+  it('鸦族语言特质：鸟族语、通用语，风族语仅理解', () => {
+    expect(grantedLanguages(corvum.languageText, [], [])).toEqual(['鸟族语', '通用语', '风族语（仅理解）'])
+  })
+
+  it('游荡者盗贼黑话对齐到语言表全名；自选超出 2 种的不计', () => {
+    expect(grantedLanguages('', ['盗贼黑话'], ["盗贼黑话Thieves' Cant"])).toEqual(["盗贼黑话Thieves' Cant"])
+    const d = deriveCharacter(
+      choices({ languages: ['通用语', '精灵语', '矮人语', '龙语'] }),
+      loaded({ species: corvum })
+    )
+    expect(d.languages).toEqual(['通用语', '鸟族语', '风族语（仅理解）', '精灵语', '矮人语'])
   })
 })

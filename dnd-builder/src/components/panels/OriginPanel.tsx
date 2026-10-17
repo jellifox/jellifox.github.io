@@ -1,7 +1,10 @@
+import { useMemo } from 'react'
 import type { AbilityKey } from '../../types'
 import { ABILITY_CN, SKILL_CN, RARE_LANGUAGES, STANDARD_LANGUAGES } from '../../data/mappings'
 import { effectiveBgChoice, effectiveSubrace, speciesTraits } from '../../rules/build'
 import { effectiveTraitOption, traitTables } from '../../rules/spells'
+import { deriveCharacter } from '../../rules/character'
+import { LANGUAGE_PICKS, toolOptions } from '../../rules/skills'
 import { EntityStatus, Section, type PanelProps } from '../ui'
 
 // ---------- 第二步：起源（种族 + 背景 + 语言） ----------
@@ -9,6 +12,10 @@ import { EntityStatus, Section, type PanelProps } from '../ui'
 export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps) {
   const species = loaded.species
   const bg = loaded.background
+  const d = useMemo(() => deriveCharacter(choices, loaded), [choices, loaded])
+  const toolOpts = bg ? toolOptions(bg.tool) : null
+  // 自选语言：不含通用语与特性赋予的
+  const freeLangs = choices.languages.filter(l => l !== '通用语' && !d.grantedLanguages.includes(l))
 
   function toggleLanguage(lang: string) {
     update(prev => ({
@@ -142,7 +149,15 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
             <span>可加值属性</span><b>{bg.abilities.map(k => ABILITY_CN[k]).join('、') || '—'}</b>
             <span>起源专长</span><b>{bg.feat || '—'}</b>
             <span>技能熟练</span><b>{bg.skills.map(s => SKILL_CN[s]).join('、')}（自动获得）</b>
-            <span>工具熟练</span><b>{bg.tool || '—'}</b>
+            <span>工具熟练</span>
+            {toolOpts ? (
+              <select value={toolOpts.includes(choices.toolChoice) ? choices.toolChoice : ''} onChange={e => update({ toolChoice: e.target.value })}>
+                <option value="">{bg.tool}</option>
+                {toolOpts.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            ) : (
+              <b>{bg.tool || '—'}</b>
+            )}
           </div>
 
           {bg.abilities.length > 0 && (
@@ -221,33 +236,32 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
         </>
       )}
 
-      <div className="field-label">标准语言（通用语 + 任选 2 种）</div>
-      <div className="chip-row">
-        {STANDARD_LANGUAGES.map(lang => (
-          <button
-            key={lang}
-            className={`chip small ${choices.languages.includes(lang) ? 'active' : ''}`}
-            disabled={lang === '通用语'}
-            onClick={() => toggleLanguage(lang)}
-          >
-            {lang}
-          </button>
-        ))}
+      <div className="field-label">
+        语言：通用语{d.grantedLanguages.length ? ` + 特性赋予（${d.grantedLanguages.join('、')}）` : ''}
+        {' '}+ 自选 {LANGUAGE_PICKS} 种（已选 {freeLangs.length}）
       </div>
-
-      <div className="field-label">稀有语言（通常来自种族/职业/背景特性）</div>
-      <div className="chip-row">
-        {RARE_LANGUAGES.map(({ name, origin }) => (
-          <button
-            key={name}
-            className={`chip small ${choices.languages.includes(name) ? 'active' : ''}`}
-            title={`起源：${origin}`}
-            onClick={() => toggleLanguage(name)}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
+      {(['标准语言', '稀有语言（通常来自种族/职业/背景特性）'] as const).map((label, gi) => (
+        <div key={label}>
+          <div className="field-label">{label}</div>
+          <div className="chip-row">
+            {(gi === 0 ? STANDARD_LANGUAGES.map(name => ({ name, origin: '' })) : RARE_LANGUAGES).map(({ name, origin }) => {
+              const granted = name === '通用语' || d.grantedLanguages.includes(name)
+              const on = granted || choices.languages.includes(name)
+              return (
+                <button
+                  key={name}
+                  className={`chip small ${on ? 'active' : ''}`}
+                  disabled={granted || (!on && freeLangs.length >= LANGUAGE_PICKS)}
+                  title={granted ? '已自动获得' : origin ? `起源：${origin}` : undefined}
+                  onClick={() => toggleLanguage(name)}
+                >
+                  {name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </Section>
   )
 }

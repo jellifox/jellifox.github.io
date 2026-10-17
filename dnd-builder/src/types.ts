@@ -136,6 +136,8 @@ export interface SpeciesData {
   subraces: SubraceEntry[] // 可选亚种，空数组表示该种族无亚种
   /** 同 SubraceEntry.abilityBonusText，种族层级的加值原文 */
   abilityBonusText: string
+  /** 「语言」段原文（2014/第三方种族直接给语言） */
+  languageText: string
   desc: string
 }
 
@@ -295,6 +297,8 @@ export interface CharacterChoices {
   /** 武器精通选择的武器 id（超出名额的保留但不生效） */
   masteryIds: string[]
   languages: string[]
+  /** 背景工具为「选择一种赌具」之类时的具体选择 */
+  toolChoice: string
   spells: string[] // 从法术速查中勾选的法术
   spellsText: string // 额外自由输入的法术
   feats: Record<string, TraitEntry> // 槽位 key（origin/style/lv4/lv19epic…）-> 已选专长快照

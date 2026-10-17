@@ -226,7 +226,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
         shield: d.profs.shield,
       },
       weaponProficiencies: d.profs.weapons,
-      toolProficiencies: [bg?.tool, d.profs.tools].filter(Boolean).join('、'),
+      toolProficiencies: d.tools,
     },
     page2: {
       // 面团的施法属性下拉用短键（str/dex/con/int/wis/cha），不是全称
@@ -239,7 +239,7 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
       appearance: '',
       backstory: c.about ?? '',
       alignment: c.alignment ?? '',
-      languages: c.languages.join('、'),
+      languages: d.languages.join('、'),
       equipment: equipment.join('\n'),
       attunement: [false, false, false],
       coins: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },

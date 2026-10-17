@@ -37,6 +37,7 @@ export const DEFAULT_CHOICES: CharacterChoices = {
   weaponIds: [],
   masteryIds: [],
   languages: ['通用语'],
+  toolChoice: '',
   spells: [],
   spellsText: '',
   feats: {},

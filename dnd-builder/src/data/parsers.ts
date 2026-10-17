@@ -194,6 +194,7 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
   const sink = () => (currentSub ? currentSub.traits : traits)
 
   let abilityBonusText = ''
+  let languageText = ''
   let current: TraitEntry | null = null
   for (const seg of boldSegments(text)) {
     const headPlain = plain(seg.head).replace(/\s+/g, ' ').trim()
@@ -221,6 +222,8 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
           const m = seg.body.match(/(\d+)\s*尺/)
           if (m) speed = parseInt(m[1], 10)
         }
+      } else if (/^语言/.test(rawName)) {
+        languageText += ' ' + seg.body
       } else if (/^属性值/.test(rawName)) {
         // 该段不进特质列表（2024 规则下种族不给加值），但 2014/第三方种族的
         // 加值原文要留存，供 speciesAbilityBonus 解析后计入总值。
@@ -289,6 +292,7 @@ export function parseSpecies(html: string, path: string): SpeciesData | null {
     traits,
     subraces,
     abilityBonusText: abilityBonusText.trim(),
+    languageText: languageText.trim(),
     desc,
   }
 }

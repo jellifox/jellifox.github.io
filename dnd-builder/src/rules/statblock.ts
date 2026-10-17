@@ -109,7 +109,7 @@ export function buildStatblock(
     : null
 
   const items = [...d.equipment]
-  if (bg?.tool) items.push(`工具熟练：${bg.tool}`)
+  if (d.tools) items.push(`工具熟练：${d.tools}`)
   for (const w of d.weapons) items.push(`${w.def.nameCn} ${w.def.nameEn}`)
   if (d.armor.id !== 'none') items.push(`${d.armor.nameCn} ${d.armor.nameEn}`)
   if (c.shield) items.push('盾牌 Shield')
@@ -151,7 +151,7 @@ export function buildStatblock(
     perception: d.passivePerception,
     skills: Object.keys(skills).length ? skills : null,
     senses,
-    languages: c.languages,
+    languages: d.languages,
     items,
     actions,
     special_abilities: specials,
