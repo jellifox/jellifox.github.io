@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CharacterChoices, LoadedEntities } from './types'
 import {
   loadBackgroundEntity, loadCachedIndex, loadClassEntity, loadIndex,
@@ -6,7 +6,9 @@ import {
 } from './data/loader'
 import { buildStatblock } from './rules/statblock'
 import { isThirdCasterSubclass } from './rules/multiclass'
-import { DEFAULT_CHOICES, DRAFT_KEY, loadDraft } from './state/draft'
+import { DEFAULT_CHOICES } from './state/draft'
+import { exportSave, loadRoster, newCharId, saveRoster, type Roster } from './state/roster'
+import { importCharacter } from './state/importer'
 import {
   AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SkillPanel, SpellPanel,
 } from './components/panels'
@@ -27,7 +29,11 @@ export default function App() {
   const [book, setBook] = useState<BookData | null>(null)
   const [progressMsg, setProgressMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [choices, setChoices] = useState<CharacterChoices>(loadDraft)
+  const [roster, setRoster] = useState<Roster>(loadRoster)
+  const choices = roster.chars[roster.current]
+  const setChoices = (fn: (prev: CharacterChoices) => CharacterChoices) =>
+    setRoster(r => ({ ...r, chars: { ...r.chars, [r.current]: fn(r.chars[r.current]) } }))
+  const fileInput = useRef<HTMLInputElement>(null)
   const [loaded, setLoaded] = useState<LoadedEntities>(EMPTY_LOADED)
   const [flags, setFlags] = useState<EntityFlags>({})
   const [savedAt, setSavedAt] = useState<string | null>(null)
@@ -36,20 +42,48 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(choices))
+        saveRoster(roster)
         setSavedAt(new Date().toLocaleTimeString('zh-CN'))
       } catch {
         setSavedAt('保存失败（存储已满）')
       }
     }, 600)
     return () => clearTimeout(t)
-  }, [choices])
+  }, [roster])
 
-  function resetDraft() {
-    if (!confirm('确认清空当前车卡进度吗？此操作不可撤销。')) return
-    localStorage.removeItem(DRAFT_KEY)
-    setChoices(DEFAULT_CHOICES)
-    setLoaded(EMPTY_LOADED)
+  // ---- 多角色 ----
+  // 不清空 loaded：各实体 effect 以 url 为依赖，url 变了自会重载/清空；
+  // 若在这里清空，而新旧角色的职业 url 相同，effect 不会重跑，职业就一直是空的
+  function switchTo(id: string, chars = roster.chars) {
+    setRoster({ current: id, chars })
+  }
+  function addChar(c: CharacterChoices) {
+    const id = newCharId()
+    switchTo(id, { ...roster.chars, [id]: c })
+  }
+  function deleteChar() {
+    if (!confirm(`确认删除角色「${choices.name || '未命名'}」吗？此操作不可撤销。`)) return
+    const { [roster.current]: _gone, ...rest } = roster.chars
+    const ids = Object.keys(rest)
+    if (ids.length) switchTo(ids[0], rest)
+    else addChar(DEFAULT_CHOICES)
+  }
+  function download(text: string, fileName: string) {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+    a.download = fileName
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+  async function importFile(file: File) {
+    if (!book) return
+    try {
+      const { choices: c, notes } = importCharacter(await file.text(), book.index)
+      addChar(c)
+      if (notes.length) alert(`已导入为新角色。请留意：\n· ${notes.join('\n· ')}`)
+    } catch (e) {
+      alert(`导入失败：${(e as Error).message}`)
+    }
   }
 
   const update = (
@@ -224,9 +258,42 @@ export default function App() {
           <button className="btn" disabled={loadingIndex} onClick={() => refresh(true)}>
             {loadingIndex ? '同步中…' : '强制刷新'}
           </button>
-          <button className="btn" onClick={resetDraft} title="清空本地车卡进度">
-            清空进度
+        </div>
+        <div className="repo-status">
+          <select
+            value={roster.current}
+            onChange={e => switchTo(e.target.value)}
+            title="切换角色（全部保存在本机浏览器）"
+          >
+            {Object.entries(roster.chars).map(([id, c]) => (
+              <option key={id} value={id}>{c.name || '未命名冒险者'}</option>
+            ))}
+          </select>
+          <button className="btn" onClick={() => addChar(DEFAULT_CHOICES)}>新建</button>
+          <button className="btn" onClick={() => addChar({ ...choices, name: `${choices.name || '未命名'}（副本）` })}>复制</button>
+          <button className="btn" onClick={deleteChar}>删除</button>
+          <button
+            className="btn"
+            disabled={!book}
+            onClick={() => fileInput.current?.click()}
+            title="导入本工具的存档，或面团角色卡导出的 JSON"
+          >
+            导入
           </button>
+          <button className="btn" onClick={() => download(exportSave(choices), `${choices.name || '未命名角色'}_车卡存档.json`)}>
+            导出存档
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={e => {
+              const f = e.target.files?.[0]
+              if (f) importFile(f)
+              e.target.value = ''
+            }}
+          />
         </div>
       </header>
 
