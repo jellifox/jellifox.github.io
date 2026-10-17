@@ -262,7 +262,7 @@ export default function App() {
                 loaded={loaded}
                 flags={flags}
               />
-              <GearPanel choices={choices} update={update} />
+              <GearPanel choices={choices} update={update} loaded={loaded} />
               <SpellPanel choices={choices} update={update} loaded={loaded} flags={flags} />
             </>
           )}

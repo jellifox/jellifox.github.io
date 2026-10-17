@@ -33,6 +33,7 @@ export const DEFAULT_CHOICES: CharacterChoices = {
   armorId: 'none',
   shield: false,
   weaponIds: [],
+  masteryIds: [],
   languages: ['通用语'],
   spells: [],
   spellsText: '',

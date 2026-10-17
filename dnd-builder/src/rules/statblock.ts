@@ -59,17 +59,19 @@ export function buildStatblock(
     }
   }
 
-  const actions: Action[] = d.weapons.map(({ def: w, ability, mod, attackBonus }) => {
-    const parts = [w.ranged ? `远程攻击：射程${w.range}` : '近战攻击：触及5尺']
+  const actions: Action[] = d.weapons.map(({ def: w, ability, damageBonus, attackBonus, mastery, notes }) => {
+    const parts = [w.ranged ? `远程攻击：射程${w.range}` : `近战攻击：触及${w.reach ? 10 : 5}尺`]
     if (w.thrown && !w.ranged) parts.push(`可投掷(${w.range})`)
     if (w.versatile) parts.push(`双手持用时伤害为${w.versatile}`)
     parts.push(`${w.damageType}伤害`)
+    if (mastery) parts.push(`精通：${mastery}`)
+    parts.push(...notes)
     return {
       name: `${w.nameCn} ${w.nameEn}`,
       desc: parts.join('，') + '。',
       attack_bonus: attackBonus,
       stat_bonus: [ability],
-      damage_dice: `${w.dice}${mod !== 0 ? fmtMod(mod) : ''}`,
+      damage_dice: `${w.dice}${damageBonus !== 0 ? fmtMod(damageBonus) : ''}`,
     }
   })
 
@@ -111,6 +113,7 @@ export function buildStatblock(
   const acSpecial = [
     d.armor.id === 'none' ? null : `${d.armor.nameCn} ${d.armor.nameEn}`,
     c.shield ? '盾牌' : null,
+    ...d.armorNotes,
   ].filter(Boolean).join('，') || null
 
   return {

@@ -95,15 +95,17 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
 
   // ---- 武器攻击（面团固定 6 行） ----
   const weapons = Array.from({ length: 6 }, () => ({ name: '', bonus: '', damage: '', note: '' }))
-  d.weapons.slice(0, 6).forEach(({ def: w, mod, attackBonus }, i) => {
+  d.weapons.slice(0, 6).forEach(({ def: w, damageBonus, attackBonus, mastery, proficient }, i) => {
     weapons[i] = {
       name: `${w.nameCn} ${w.nameEn}`.trim(),
       bonus: fmtMod(attackBonus),
-      damage: `${w.dice}${mod !== 0 ? fmtMod(mod) : ''} ${w.damageType}`,
+      damage: `${w.dice}${damageBonus !== 0 ? fmtMod(damageBonus) : ''} ${w.damageType}`,
       note: [
-        w.ranged ? `射程${w.range}` : '近战',
+        w.ranged ? `射程${w.range}` : w.reach ? '触及10尺' : '近战',
         w.versatile ? `多用${w.versatile}` : '',
         w.thrown && !w.ranged ? `可投掷${w.range}` : '',
+        mastery ? `精通：${mastery}` : '',
+        proficient ? '' : '未熟练',
       ].filter(Boolean).join('，'),
     }
   })

@@ -288,6 +288,8 @@ export interface CharacterChoices {
   armorId: string
   shield: boolean
   weaponIds: string[]
+  /** 武器精通选择的武器 id（超出名额的保留但不生效） */
+  masteryIds: string[]
   languages: string[]
   spells: string[] // 从法术速查中勾选的法术
   spellsText: string // 额外自由输入的法术
