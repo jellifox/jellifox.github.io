@@ -6,7 +6,7 @@ import type {
 } from '../types'
 import {
   DEFAULT_BRANCH, PARSER_VERSION, fetchPage, fetchWcp, getBranchInfo,
-  loadCache, saveCache,
+  entityKey, loadCache, pruneEntityCache, saveCache,
 } from './github'
 import { parseBookIndex, type BookIndex } from './toc'
 import {
@@ -60,21 +60,40 @@ export function loadCachedIndex(): BookData | null {
 
 type EntityKind = 'species' | 'background' | 'class' | 'subclass' | 'spelllist' | 'featpage'
 
-interface EntityStore {
-  [key: string]: unknown
-}
+// 一级缓存在内存（同一会话内零开销），二级缓存在 localStorage（跨刷新）
+const mem = new Map<string, unknown>()
+let pruned = false
 
 function entityCacheGet<T>(sha: string, kind: EntityKind, url: string): T | null {
-  const env = loadCache<EntityStore>('entities', sha)
-  if (!env) return null
-  return (env.data[`${kind}:${url}`] as T) ?? null
+  const key = entityKey(sha, kind, url)
+  if (mem.has(key)) return mem.get(key) as T
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const value = JSON.parse(raw) as T
+    mem.set(key, value)
+    return value
+  } catch {
+    return null
+  }
 }
 
-function entityCachePut(sha: string, branch: string, kind: EntityKind, url: string, value: unknown) {
-  const env = loadCache<EntityStore>('entities', sha)
-  const store: EntityStore = env?.data ?? {}
-  store[`${kind}:${url}`] = value
-  saveCache('entities', { sha, branch, parserVersion: PARSER_VERSION, data: store })
+function entityCachePut(sha: string, kind: EntityKind, url: string, value: unknown) {
+  const key = entityKey(sha, kind, url)
+  mem.set(key, value)
+  // 每个会话首次写入时清一次旧版本/旧 commit 的键
+  if (!pruned) {
+    pruneEntityCache(sha)
+    pruned = true
+  }
+  const json = JSON.stringify(value)
+  try {
+    localStorage.setItem(key, json)
+  } catch {
+    // 超额：清掉旧键后重试一次；仍失败就只留内存缓存
+    pruneEntityCache(sha)
+    try { localStorage.setItem(key, json) } catch { /* 放弃持久化 */ }
+  }
 }
 
 const inflight = new Map<string, Promise<unknown>>()
@@ -94,7 +113,7 @@ async function loadEntity<T>(
       const html = await fetchPage(meta.sha, url)
       const parsed = parse(html, url)
       if (!parsed) throw new Error(`页面解析失败：${url}`)
-      entityCachePut(meta.sha, meta.branch, kind, url, parsed)
+      entityCachePut(meta.sha, kind, url, parsed)
       return parsed
     } finally {
       // 成功或失败都要清除：否则失败的 Promise 会留在表里，本次会话内重试永远拿到同一个失败

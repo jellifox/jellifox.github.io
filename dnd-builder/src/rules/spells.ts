@@ -12,7 +12,7 @@
 import type {
   CharacterChoices, LoadedEntities, SpellEntry, TraitEntry,
 } from '../types'
-import { speciesTraits } from './build'
+import { activeFeats, speciesTraits } from './build'
 import { classInstances } from './multiclass'
 import { subclassFeatureLevel } from '../data/parsers'
 
@@ -152,7 +152,7 @@ export function grantedSpells(c: CharacterChoices, loaded: LoadedEntities): Gran
       collect([f], `子职·${inst.subclass.nameCn}`, lv)
     }
   }
-  for (const f of Object.values(c.feats)) collect([f], '专长')
+  for (const f of Object.values(activeFeats(c, loaded))) collect([f], '专长')
 
   return out.filter(g => g.level <= c.level).sort((a, b) => a.level - b.level)
 }

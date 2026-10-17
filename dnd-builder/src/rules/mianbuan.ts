@@ -4,22 +4,11 @@
 // 每个派生值都带 { value, overridden } —— 我们只填 value 并保持 overridden:false，
 // 让面团那边继续自动计算；用户在面团里手动改写时才会置为 true。
 
-import type {
-  AbilityKey, CharacterChoices, LoadedEntities, SkillKey,
-} from '../types'
-import { SKILL_ABILITY, cnToSkill } from '../data/mappings'
-import {
-  allFeatSlots, deriveAbilities, deriveHp, effectiveSubrace, gainedFeatures, speciesTraits,
-} from './build'
-import { grantedSpells } from './spells'
-import {
-  classInstances, hitDiceLabel, proficiencySummary, spellSlotsFor,
-} from './multiclass'
-import {
-  ARMORS, WEAPONS, abilityMod, armorClassValue, fmtMod,
-  proficiencyBonus, weaponAttackAbility,
-} from './rules'
-import { subclassFeatureLevel } from '../data/parsers'
+import type { AbilityKey, CharacterChoices, LoadedEntities, SkillKey } from '../types'
+import { SKILL_ABILITY } from '../data/mappings'
+import { deriveCharacter } from './character'
+import { hitDiceLabel } from './multiclass'
+import { fmtMod } from './rules'
 
 /** 我方 SkillKey -> 面团技能键（snake_case -> camelCase） */
 const SKILL_TO_MIANBUAN: Record<SkillKey, string> = {
@@ -81,44 +70,11 @@ function structuredBlock(items: { name: string; level?: string; detail: string }
 }
 
 export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): MianbuanState {
-  const cls = loaded.cls ?? undefined
-  const sub = loaded.subclass ?? undefined
-  const species = loaded.species ?? undefined
-  const bg = loaded.background ?? undefined
-
-  const ab = deriveAbilities(c, loaded.background, species, loaded)
-  const pb = proficiencyBonus(c.level)
-  const level = c.level
-
-  // ---- 生命值 / 护甲（与角色卡预览共用 deriveHp / speciesTraits） ----
-  const subraceName = effectiveSubrace(species, c.subraceChoice)
-  const spTraits = speciesTraits(species, c.subraceChoice)
-  const hpInfo = deriveHp(c, loaded, spTraits, ab.mods.CON)
-  const inst = classInstances(c, loaded)
-  // 起始职业完整熟练 + 兼职职业的部分熟练
-  const profs = proficiencySummary(inst)
-  const hitDie = hpInfo.hitDie
-  const hpMax = hpInfo.max
-
-  const armor = ARMORS.find(a => a.id === c.armorId) ?? ARMORS[0]
-  const acValue = armorClassValue(armor, ab.mods.DEX, c.shield)
-
-  // ---- 熟练技能（背景 + 职业选择 + 种族特质授予） ----
-  const profSkills = new Set<SkillKey>([
-    ...(bg?.skills ?? []),
-    ...c.classSkills,
-    // 兼职职业给的那一项自选技能
-    ...(c.multiclasses ?? []).map(m => m.skill).filter((x): x is SkillKey => !!x),
-  ])
-  for (const t of spTraits) {
-    const m = t.desc.match(/拥有(?:对)?([^\n。，]{1,6})技能的熟练|获得([^\n。，]{1,6})技能熟练/)
-    if (m) {
-      const sk = cnToSkill((m[1] ?? m[2]).trim())
-      if (sk) profSkills.add(sk)
-    }
-  }
-
-  const saveSet = new Set<AbilityKey>(cls?.saves ?? [])
+  const d = deriveCharacter(c, loaded)
+  const { abilities: ab, pb, instances: inst } = d
+  const species = loaded.species
+  const bg = loaded.background
+  const saveSet = new Set<AbilityKey>(d.saves)
 
   // ---- 属性 / 调整值 / 豁免 / 技能 ----
   const stats: Record<string, number> = {}
@@ -131,24 +87,19 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
     const isProf = saveSet.has(k)
     savingThrows[key] = profDerived(isProf ? 1 : 0, ab.mods[k] + (isProf ? pb : 0))
   }
-
   const skills: Record<string, ProfDerived> = {}
   for (const [sk, mb] of Object.entries(SKILL_TO_MIANBUAN) as [SkillKey, string][]) {
-    const isProf = profSkills.has(sk)
+    const isProf = d.profSkills.has(sk)
     skills[mb] = profDerived(isProf ? 1 : 0, ab.mods[SKILL_ABILITY[sk]] + (isProf ? pb : 0))
   }
 
   // ---- 武器攻击（面团固定 6 行） ----
   const weapons = Array.from({ length: 6 }, () => ({ name: '', bonus: '', damage: '', note: '' }))
-  c.weaponIds.slice(0, 6).forEach((wid, i) => {
-    const w = WEAPONS.find(x => x.id === wid)
-    if (!w) return
-    const atkAb = weaponAttackAbility(w, ab.mods.STR, ab.mods.DEX)
-    const atkMod = ab.mods[atkAb]
+  d.weapons.slice(0, 6).forEach(({ def: w, mod, attackBonus }, i) => {
     weapons[i] = {
       name: `${w.nameCn} ${w.nameEn}`.trim(),
-      bonus: fmtMod(atkMod + pb),
-      damage: `${w.dice}${atkMod !== 0 ? fmtMod(atkMod) : ''} ${w.damageType}`,
+      bonus: fmtMod(attackBonus),
+      damage: `${w.dice}${mod !== 0 ? fmtMod(mod) : ''} ${w.damageType}`,
       note: [
         w.ranged ? `射程${w.range}` : '近战',
         w.versatile ? `多用${w.versatile}` : '',
@@ -157,90 +108,46 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
     }
   })
 
-  // ---- 职业特性 / 子职特性 ----
+  // ---- 职业特性 / 子职特性（兼职时等级标签带职业名） ----
   const classItems: { name: string; level?: string; detail: string }[] = []
-  const multi = inst.length > 1
-  for (const i of inst) {
-    const byLevel = new Map<number, string[]>()
-    for (const f of gainedFeatures(i.cls, i.level)) {
-      byLevel.set(f.level, [...(byLevel.get(f.level) ?? []), f.name])
+  for (const g of d.classFeatures) {
+    const tag = d.multiclassed ? g.inst.cls.nameCn : ''
+    for (const [lv, names] of g.byLevel) {
+      classItems.push({ name: names.join('、'), level: `${tag}${lv}级`, detail: '' })
     }
-    for (const [lv, names] of [...byLevel.entries()].sort((a, b) => a[0] - b[0])) {
-      classItems.push({ name: names.join('、'), level: `${multi ? i.cls.nameCn : ''}${lv}级`, detail: '' })
-    }
-    for (const f of i.subclass?.features ?? []) {
-      if (subclassFeatureLevel(f.name) <= i.level) {
-        classItems.push({
-          name: `${i.subclass!.nameCn}：${f.name.replace(/^\d+\s*级\s*[：:]/, '')}`,
-          level: `${multi ? i.cls.nameCn : ''}${subclassFeatureLevel(f.name)}级`,
-          detail: f.desc,
-        })
-      }
+    for (const { level, feature } of g.subclassFeatures) {
+      classItems.push({
+        name: `${g.inst.subclass!.nameCn}：${feature.name.replace(/^\d+\s*级\s*[：:]/, '')}`,
+        level: `${tag}${level}级`,
+        detail: feature.desc,
+      })
     }
   }
 
-  // ---- 种族特质 ----
-  const raceItems = spTraits.map(t => ({ name: t.name, detail: t.desc }))
-
-  // ---- 专长（起源 + 各升级槽位） ----
-  const featItems: { name: string; level?: string; detail: string }[] = []
-  const origin = c.feats['origin']
-  if (origin) featItems.push({ name: origin.name, level: '起源', detail: origin.desc })
-  else if (bg?.feat) featItems.push({ name: bg.feat, level: '起源', detail: `来自背景「${bg.nameCn}」。` })
-  for (const slot of allFeatSlots(c, loaded)) {
-    const f = c.feats[slot.key]
-    if (!f) continue
-    const lv =
-      slot.kind === 'style' ? '战斗风格' :
-      slot.kind === 'epic' ? '传奇恩惠' :
-      slot.label.replace(/ · .*$/, '')
-    featItems.push({ name: f.name, level: lv, detail: f.desc })
-  }
-
-  // ---- 施法 / 法术位 ----
-  const slotInfo = spellSlotsFor(inst)
-  // 面团只有一个施法属性栏：取起始职业的，起始职业不施法时取第一个施法职业
-  const spellAb = cls?.spellAbility ?? inst.find(i => i.cls.spellAbility)?.cls.spellAbility ?? null
+  // ---- 施法 / 法术位：面团只有一个施法属性栏，取第一个施法职业的 ----
+  const spellAb = d.casters[0]?.ability ?? null
   const spellMod = spellAb ? ab.mods[spellAb] : null
-
   const DIAMOND_COUNT: Record<string, number> = {
     '1': 4, '2': 3, '3': 3, '4': 3, '5': 3, '6': 2, '7': 2, '8': 1, '9': 1,
   }
   const spellSlots: Record<string, { total: number; diamonds: boolean[] }> = {}
   for (const ring of Object.keys(DIAMOND_COUNT)) {
-    const total = slotInfo.slots[parseInt(ring, 10)] ?? 0
     spellSlots[ring] = {
-      total,
+      total: d.slots.slots[parseInt(ring, 10)] ?? 0,
       diamonds: Array.from({ length: DIAMOND_COUNT[ring] }, () => false),
     }
   }
   // 魔契法术位并入对应环阶
-  if (slotInfo.pact) {
-    const key = String(slotInfo.pact.level)
-    if (spellSlots[key]) spellSlots[key].total += slotInfo.pact.count
+  if (d.slots.pact) {
+    const key = String(d.slots.pact.level)
+    if (spellSlots[key]) spellSlots[key].total += d.slots.pact.count
   }
-
-  // 从法术速查回查环阶与学派——否则导出的法术在面团里全部变成 0 环、无学派
-  // 用未过滤的全表查元数据：特性赋予的法术常不在本职业列表内（如森林侏儒的动物交谈）
-  const byName = new Map(
-    (loaded.spellList?.all ?? loaded.spellList?.spells ?? []).map(s => [s.name, s])
-  )
-  // 特性赋予的法术一并导出，并在备注里标明来源
-  const grants = grantedSpells(c, loaded)
-  const spellItems = [
-    ...c.spells.map(name => ({ name, entry: byName.get(name), note: '' })),
-    ...grants
-      .filter(g => !c.spells.includes(g.name))
-      .map(g => ({ name: g.name, entry: byName.get(g.name), note: g.source })),
-    // 手动补充的法术查不到元数据，按 0 环导出，由使用者在面团里改
-    ...c.spellsText.split('\n').map(s => s.trim()).filter(Boolean)
-      .map(name => ({ name, entry: undefined, note: '' })),
-  ]
   const spells = {
-    mode: spellItems.length > 0 ? 'structured' : 'free',
+    mode: d.spells.length > 0 ? 'structured' : 'free',
     freeText: '',
     freeTextFontSize: 9,
-    structuredList: spellItems.map(({ name, entry, note }) => ({
+    // 手动补充的法术查不到元数据，按 0 环导出，由使用者在面团里改
+    structuredList: d.spells.map(({ name, entry, source }) => ({
       id: nextId(),
       level: entry?.ring ?? 0,
       prepared: false,
@@ -251,24 +158,15 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
       concentration: entry?.concentration ?? false,
       ritual: entry?.ritual ?? false,
       material: (entry?.components ?? '').includes('M'),
-      note: note || (entry?.source ? `来源：${entry.source}` : ''),
+      note: source || (entry?.source ? `来源：${entry.source}` : ''),
       description: '', higherLevel: '',
       fromDatabase: false, databaseId: null,
     })),
   }
 
-  // ---- 装备清单 ----
-  const equipment: string[] = []
-  if (cls && cls.equipmentOptions[c.classEquipChoice]) {
-    equipment.push(`职业装备：${cls.equipmentOptions[c.classEquipChoice]}`)
-  }
-  if (bg && bg.equipmentOptions[c.bgEquipChoice]) {
-    equipment.push(`背景装备：${bg.equipmentOptions[c.bgEquipChoice]}`)
-  }
-  if (armor.id !== 'none') equipment.push(`${armor.nameCn} ${armor.nameEn}`)
+  const equipment = [...d.equipment]
+  if (d.armor.id !== 'none') equipment.push(`${d.armor.nameCn} ${d.armor.nameEn}`)
   if (c.shield) equipment.push('盾牌 Shield')
-
-  const sizeCn = c.sizeChoice || species?.sizeOptions[0] || '中型'
 
   return {
     meta: {
@@ -279,25 +177,19 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
     page1: {
       charName: c.name || '未命名角色',
       background: bg?.nameCn ?? '',
-      charClass: inst.length ? inst.map(i => `${i.cls.nameCn} ${i.level}级`).join(' ') : '',
-      race: species ? species.nameCn + (subraceName ? `（${subraceName}）` : '') : '',
+      charClass: inst.map(i => `${i.cls.nameCn} ${i.level}级`).join(' '),
+      race: species ? species.nameCn + (d.subraceName ? `（${d.subraceName}）` : '') : '',
       subclass: inst.map(i => i.subclass?.nameCn).filter(Boolean).join(' / '),
-      level: String(level),
+      level: String(d.level),
       exp: '',
       portraitData: '',
-      armorClass: String(acValue),
+      armorClass: String(d.ac),
       shield: c.shield ? '是' : '',
-      hp: {
-        temp: 0,
-        consumed: 0,
-        max: hpMax,
-        currentOverridden: false,
-        currentVal: hpMax,
-      },
+      hp: { temp: 0, consumed: 0, max: d.hp.max, currentOverridden: false, currentVal: d.hp.max },
       hitDice: inst.length ? hitDiceLabel(inst) : '',
-      hitDiceTotal: inst.length ? String(level) : '',
-      speed: String(species?.speed || 30),
-      size: sizeCn,
+      hitDiceTotal: inst.length ? String(d.level) : '',
+      speed: String(d.speed),
+      size: d.sizeCn,
       deathSaves: { success: [false, false, false], fail: [false, false, false] },
       proficiencyBonus: pb,
       heroicInspiration: false,
@@ -306,21 +198,19 @@ export function toMianbuan(c: CharacterChoices, loaded: LoadedEntities): Mianbua
       modifiers,
       skills,
       initiative: derived(ab.mods.DEX),
-      passivePerception: derived(
-        10 + ab.mods.WIS + (profSkills.has('perception') ? pb : 0)
-      ),
+      passivePerception: derived(d.passivePerception),
       weapons,
       classFeatures: structuredBlock(classItems),
-      racialTraits: structuredBlock(raceItems),
-      feats: structuredBlock(featItems),
+      racialTraits: structuredBlock(d.spTraits.map(t => ({ name: t.name, detail: t.desc }))),
+      feats: structuredBlock(d.feats.map(f => ({ name: f.name, level: f.tag, detail: f.desc }))),
       armorProf: {
-        light: profs.light,
-        medium: profs.medium,
-        heavy: profs.heavy,
-        shield: profs.shield,
+        light: d.profs.light,
+        medium: d.profs.medium,
+        heavy: d.profs.heavy,
+        shield: d.profs.shield,
       },
-      weaponProficiencies: profs.weapons,
-      toolProficiencies: [bg?.tool, profs.tools].filter(Boolean).join('、'),
+      weaponProficiencies: d.profs.weapons,
+      toolProficiencies: [bg?.tool, d.profs.tools].filter(Boolean).join('、'),
     },
     page2: {
       // 面团的施法属性下拉用短键（str/dex/con/int/wis/cha），不是全称
@@ -348,21 +238,3 @@ export function mianbuanFileName(c: CharacterChoices): string {
 
 // ponytail: 仅做「本工具 -> 面团」单向导出；反向导入需要把自由文本再解析回
 // 结构化选择（职业/子职/种族的 url），代价远大于收益，等真有需求再说。
-
-/** 自检：核心字段齐全、技能键与面团一致（浏览器控制台可手动调用） */
-export function selfCheck(c: CharacterChoices, loaded: LoadedEntities): string[] {
-  const s = toMianbuan(c, loaded)
-  const errs: string[] = []
-  const p1 = s.page1 as Record<string, Record<string, unknown>>
-  for (const k of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-    if (typeof (p1.stats as Record<string, number>)[k] !== 'number') errs.push(`stats.${k} 缺失`)
-    if (!(k in (p1.savingThrows as object))) errs.push(`savingThrows.${k} 缺失`)
-  }
-  for (const mb of Object.values(SKILL_TO_MIANBUAN)) {
-    if (!(mb in (p1.skills as object))) errs.push(`skills.${mb} 缺失`)
-  }
-  if (Array.isArray(p1.weapons) && (p1.weapons as unknown[]).length !== 6) {
-    errs.push('weapons 必须是 6 行')
-  }
-  return errs
-}

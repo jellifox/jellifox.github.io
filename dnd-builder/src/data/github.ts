@@ -131,10 +131,45 @@ export function saveCache<T>(kind: string, env: Envelope<T>) {
     console.warn('缓存写入失败（可能超出 localStorage 限额）', e)
     try {
       // 清掉实体缓存腾空间，索引缓存优先保留
-      localStorage.removeItem(cacheKey('entities'))
+      pruneEntityCache(null)
       localStorage.setItem(cacheKey(kind), JSON.stringify(env))
     } catch {
       /* 放弃缓存 */
     }
+  }
+}
+
+// ---------- 实体缓存：每个实体一个键 ----------
+// 早期所有实体塞进同一个键，每存一个都要整体解析再序列化约 50 万字符，
+// 并发加载时读-改-写还会互相覆盖。现改为每实体独立键，键里带解析器版本与 commit，
+// 版本或仓库更新后旧键自然失效，并在写入失败时被清理。
+
+const ENTITY_PREFIX = `${PREFIX}:e:`
+
+/** 实体缓存键；同一前缀下的键属于当前解析器版本 + 当前 commit */
+export function entityKey(sha: string, kind: string, url: string): string {
+  return `${entityKeyPrefix(sha)}${kind}:${url}`
+}
+
+function entityKeyPrefix(sha: string): string {
+  return `${ENTITY_PREFIX}${PARSER_VERSION}:${sha}:`
+}
+
+/**
+ * 清理实体缓存：keepSha 为当前 commit 时只删旧版本/旧 commit 的键；为 null 时全部删除。
+ * 同时清掉旧格式的单键缓存。
+ */
+export function pruneEntityCache(keepSha: string | null) {
+  try {
+    const keep = keepSha ? entityKeyPrefix(keepSha) : null
+    const doomed: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(ENTITY_PREFIX) && (!keep || !k.startsWith(keep))) doomed.push(k)
+    }
+    doomed.forEach(k => localStorage.removeItem(k))
+    localStorage.removeItem(cacheKey('entities'))
+  } catch {
+    /* 存储不可用时忽略 */
   }
 }

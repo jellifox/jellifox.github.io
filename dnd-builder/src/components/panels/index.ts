@@ -1,0 +1,8 @@
+// 车卡各步骤面板。每个面板一个文件，公共组件（Section / NumberField 等）在 ../ui.tsx。
+export { BasicsPanel } from './BasicsPanel'
+export { ClassPanel } from './ClassPanel'
+export { OriginPanel } from './OriginPanel'
+export { AbilityPanel } from './AbilityPanel'
+export { GearPanel } from './GearPanel'
+export { FeatPanel } from './FeatPanel'
+export { SpellPanel } from './SpellPanel'

@@ -4,7 +4,8 @@ import {
   loadBackgroundEntity, loadCachedIndex, loadClassEntity, loadIndex,
   loadSpeciesEntity, loadSpellListEntity, loadSubclassEntity, type BookData,
 } from './data/loader'
-import { buildStatblock } from './rules/build'
+import { buildStatblock } from './rules/statblock'
+import { isThirdCasterSubclass, multiclassKeyPrefix } from './rules/multiclass'
 import {
   AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SpellPanel,
 } from './components/panels'
@@ -16,7 +17,7 @@ const EMPTY_LOADED: LoadedEntities = {
   species: null,
   background: null,
   spellList: null,
-  multiclasses: [],
+  multiclasses: {},
 }
 
 const DEFAULT_CHOICES: CharacterChoices = {
@@ -63,12 +64,34 @@ export type EntityFlags = Partial<Record<keyof LoadedEntities, 'loading' | strin
 // 这样存档很小，也不会随规则书更新而失效。
 const DRAFT_KEY = 'dnd5r-builder:draft'
 
+/**
+ * 迁移旧草稿：早期兼职键用数组下标（'mc0:lv4'、'feat:mc0:lv4:0'），删除兼职会错位；
+ * 现改为 'mc:<classUrl>:'。按旧草稿里 multiclasses 的顺序换算一次。
+ */
+function migrateDraft(c: CharacterChoices): CharacterChoices {
+  const urls = (c.multiclasses ?? []).map(m => m.classUrl)
+  const rekey = <T,>(rec: Record<string, T>): Record<string, T> =>
+    Object.fromEntries(
+      Object.entries(rec ?? {}).map(([k, v]) => [
+        k.replace(/(^|feat:)mc(\d+):/, (all, pre: string, n: string) =>
+          urls[+n] ? `${pre}${multiclassKeyPrefix(urls[+n])}` : all),
+        v,
+      ])
+    )
+  return {
+    ...c,
+    feats: rekey(c.feats),
+    abilityPicks: rekey(c.abilityPicks),
+    bonusSchemes: rekey(c.bonusSchemes),
+  }
+}
+
 function loadDraft(): CharacterChoices {
   try {
     const raw = localStorage.getItem(DRAFT_KEY)
     if (!raw) return DEFAULT_CHOICES
     // 与默认值合并：老存档缺少的新字段自动补齐
-    return { ...DEFAULT_CHOICES, ...(JSON.parse(raw) as Partial<CharacterChoices>) }
+    return migrateDraft({ ...DEFAULT_CHOICES, ...(JSON.parse(raw) as Partial<CharacterChoices>) })
   } catch {
     return DEFAULT_CHOICES
   }
@@ -185,7 +208,8 @@ export default function App() {
       'species',
       choices.speciesUrl,
       loadSpeciesEntity(book.meta, choices.speciesUrl),
-      sp => update({ sizeChoice: sp.sizeOptions[0] })
+      // 只在当前体型不属于该种族时才写默认值——否则刷新页面恢复草稿时会覆盖用户的选择
+      sp => update(prev => (sp.sizeOptions.includes(prev.sizeChoice) ? {} : { sizeChoice: sp.sizeOptions[0] }))
     )
   }, [book, choices.speciesUrl])
 
@@ -194,38 +218,45 @@ export default function App() {
     return trackEntity(
       'background',
       choices.backgroundUrl,
-      loadBackgroundEntity(book.meta, choices.backgroundUrl),
-      bg => update({ bgPlus2: bg.abilities[0] ?? null, bgPlus1: bg.abilities[1] ?? null })
+      // 不在加载后写默认 +2/+1：effectiveBgChoice 已负责回退，写入反而会在刷新时覆盖用户选择
+      loadBackgroundEntity(book.meta, choices.backgroundUrl)
     )
   }, [book, choices.backgroundUrl])
 
-  // 兼职职业及其子职：按 url 逐个懒加载，结果与 choices.multiclasses 一一对应
+  // 兼职职业及其子职：按 url 懒加载，结果以 classUrl 为键存放（不按下标，避免增删时错位）
   const mcKey = (choices.multiclasses ?? []).map(m => `${m.classUrl}|${m.subclassUrl}`).join(';')
   useEffect(() => {
     if (!book) return
     const picks = choices.multiclasses ?? []
     if (picks.length === 0) {
-      setLoaded(l => (l.multiclasses.length ? { ...l, multiclasses: [] } : l))
+      setLoaded(l => (Object.keys(l.multiclasses).length ? { ...l, multiclasses: {} } : l))
       return
     }
     let alive = true
     Promise.all(
-      picks.map(async m => ({
-        cls: m.classUrl ? await loadClassEntity(book.meta, m.classUrl).catch(() => null) : null,
+      picks.map(async m => [m.classUrl, {
+        cls: await loadClassEntity(book.meta, m.classUrl).catch(() => null),
         subclass: m.subclassUrl ? await loadSubclassEntity(book.meta, m.subclassUrl).catch(() => null) : null,
-      }))
-    ).then(list => { if (alive) setLoaded(l => ({ ...l, multiclasses: list })) })
+      }] as const)
+    ).then(entries => { if (alive) setLoaded(l => ({ ...l, multiclasses: Object.fromEntries(entries) })) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, mcKey])
 
   // 法术表：起始职业与所有兼职职业的法术并集（总表按职业列筛选）
+  // 奥法骑士/诡术师用法师法术列表，而总表里战士/游荡者没有条目，需要额外并入法师
+  const subTitleOf = (classUrl: string, subUrl: string) =>
+    book?.index.classes.find(c => c.url === classUrl)?.subclasses.find(s => s.url === subUrl)?.title ?? ''
+  const needsWizardList = [
+    subTitleOf(choices.classUrl, choices.subclassUrl),
+    ...(choices.multiclasses ?? []).map(m => subTitleOf(m.classUrl, m.subclassUrl)),
+  ].some(isThirdCasterSubclass)
   const classTitlesKey = [choices.classUrl, ...(choices.multiclasses ?? []).map(m => m.classUrl)]
-    .filter(Boolean).join(';')
+    .filter(Boolean).join(';') + (needsWizardList ? ';+法师' : '')
   useEffect(() => {
     if (!book || !choices.classUrl) return trackEntity('spellList', '', null)
     const titles = classTitlesKey.split(';')
-      .map(u => book.index.classes.find(c => c.url === u)?.title)
+      .map(u => (u === '+法师' ? '法师' : book.index.classes.find(c => c.url === u)?.title))
       .filter((t): t is string => !!t)
     const urls = book.index.spellLists.map(s => s.url)
     if (titles.length === 0 || urls.length === 0) return trackEntity('spellList', '', null)

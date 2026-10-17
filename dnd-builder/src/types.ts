@@ -225,7 +225,7 @@ export interface FeatPage {
   feats: TraitEntry[]
 }
 
-/** 兼职职业对应的已解析实体（与 CharacterChoices.multiclasses 一一对应） */
+/** 兼职职业对应的已解析实体（以 classUrl 为键，见 LoadedEntities.multiclasses） */
 export interface LoadedMulticlass {
   cls: ClassData | null
   subclass: SubclassData | null
@@ -238,7 +238,8 @@ export interface LoadedEntities {
   species: SpeciesData | null
   background: BackgroundData | null
   spellList: SpellList | null
-  multiclasses: LoadedMulticlass[]
+  /** 以兼职职业的 classUrl 为键：按 url 查找，增删兼职时异步加载也不会错位 */
+  multiclasses: Record<string, LoadedMulticlass>
 }
 
 // ---------- 车卡过程中的用户选择 ----------

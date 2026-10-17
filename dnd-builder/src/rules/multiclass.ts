@@ -8,11 +8,14 @@
 import type {
   AbilityKey, CharacterChoices, ClassData, LoadedEntities, SkillKey, SubclassData,
 } from '../types'
-import { ABILITY_CN, cnTextToSkills } from '../data/mappings'
+import { ABILITY_CN } from '../data/mappings'
 
 /** 一个职业实例：起始职业或某个兼职 */
 export interface ClassInstance {
-  /** 专长槽位等键的前缀：起始职业为 ''（兼容旧存档），兼职为 'mc0:'、'mc1:'… */
+  /**
+   * 专长槽位等键的前缀：起始职业为 ''（兼容旧存档），兼职为 'mc:<classUrl>:'。
+   * 每个职业在角色中唯一，以 url 作键稳定，增删其他兼职不会让键错位。
+   */
   keyPrefix: string
   index: number // -1 = 起始职业；0.. = 兼职序号
   cls: ClassData
@@ -23,6 +26,11 @@ export interface ClassInstance {
 
 export function multiclassLevelSum(c: CharacterChoices): number {
   return (c.multiclasses ?? []).reduce((n, m) => n + Math.max(0, m.level), 0)
+}
+
+/** 兼职职业名下各种键（专长槽位、属性分配、方案选择）的前缀 */
+export function multiclassKeyPrefix(classUrl: string): string {
+  return `mc:${classUrl}:`
 }
 
 /** 起始职业等级（至少 1） */
@@ -40,10 +48,10 @@ export function classInstances(c: CharacterChoices, loaded: LoadedEntities): Cla
     })
   }
   ;(c.multiclasses ?? []).forEach((m, i) => {
-    const lm = loaded.multiclasses?.[i]
+    const lm = loaded.multiclasses?.[m.classUrl]
     if (!lm?.cls || m.level <= 0) return
     out.push({
-      keyPrefix: `mc${i}:`, index: i, cls: lm.cls, subclass: lm.subclass,
+      keyPrefix: multiclassKeyPrefix(m.classUrl), index: i, cls: lm.cls, subclass: lm.subclass,
       level: m.level, primary: false,
     })
   })
@@ -170,6 +178,19 @@ export type CasterType = 'full' | 'half' | 'third' | 'pact' | 'none'
 /** 子职给施法的三分之一施法者（奥法骑士、诡术师） */
 const THIRD_CASTER_SUB = /奥法骑士|诡术师|Eldritch Knight|Arcane Trickster/
 
+/** 子职名是否为三分之一施法者：它们用法师法术列表、以智力施法 */
+export function isThirdCasterSubclass(name: string): boolean {
+  return THIRD_CASTER_SUB.test(name)
+}
+
+/**
+ * 该职业实例的施法属性。职业页写明的优先；三分之一施法者的职业（战士/游荡者）
+ * 页面没有施法属性，按规则取智力。
+ */
+export function spellAbilityOf(inst: Pick<ClassInstance, 'cls' | 'subclass'>): AbilityKey | null {
+  return inst.cls.spellAbility ?? (casterType(inst) === 'third' ? 'INT' : null)
+}
+
 /**
  * 判定施法进度。不硬编码职业名单（第三方职业也要能算），而是看该职业自身
  * 法术位表的最高环阶：9 环 = 全施法者，5 环 = 半施法者；有契约法术位 = 契约魔法。
@@ -235,6 +256,7 @@ export function spellSlotsFor(instances: ClassInstance[]): SlotResult {
   })
 
   if (casters.length === 0) return { slots: {}, pact, mode: 'none', casterLevel: 0 }
+  let lv: number
   if (casters.length === 1) {
     // 规则：只从某一职业获得施法特性时，遵从该职业自身的规则
     const only = casters[0]
@@ -242,8 +264,13 @@ export function spellSlotsFor(instances: ClassInstance[]): SlotResult {
     if (t !== 'third') {
       return { slots: ownSlots(only), pact, mode: 'single', casterLevel: casterLevelContribution(t, only.level) }
     }
+    // 奥法骑士/诡术师的法术位表在子职页上，等价于施法者等级 ⌈等级/3⌉ 查表
+    // （兼职时才按「三分之一向下取整」计入）。如 EK4 → 施法者等级 2 → 3 个一环位。
+    lv = Math.ceil(only.level / 3)
+  } else {
+    lv = casters.reduce((n, i) => n + casterLevelContribution(casterType(i), i.level), 0)
   }
-  const lv = Math.min(20, casters.reduce((n, i) => n + casterLevelContribution(casterType(i), i.level), 0))
+  lv = Math.min(20, lv)
   const slots: Partial<Record<number, number>> = {}
   ;(MULTICLASS_SLOTS[lv] ?? []).forEach((n, idx) => { if (n) slots[idx + 1] = n })
   return { slots, pact, mode: casters.length === 1 ? 'single' : 'multi', casterLevel: lv }
