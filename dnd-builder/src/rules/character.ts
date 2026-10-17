@@ -13,7 +13,7 @@ import {
   gainedFeatures, speciesTraits, type DerivedAbilities,
 } from './build'
 import {
-  classInstances, proficiencySummary, spellAbilityOf, spellSlotsFor,
+  classInstances, parsePrereq, proficiencySummary, spellAbilityOf, spellSlotsFor,
   type ClassInstance, type ProficiencySummary, type SlotResult,
 } from './multiclass'
 import {
@@ -116,6 +116,37 @@ export interface DerivedCharacter {
   equipment: string[]
   sizeCn: string
   speed: number
+}
+
+/**
+ * 专长先决：解析描述首行「（先决：等级4+，力量或敏捷13+）」，返回不满足的条目。
+ * 认得等级、属性 13+（「或」为任选）、护甲/盾牌受训、施法特性；其他先决不判断。
+ * ponytail: 用当前总值判断属性，不回溯到取得该专长时的数值。
+ */
+export function featPrereqUnmet(
+  desc: string,
+  d: Pick<DerivedCharacter, 'level' | 'abilities' | 'profs' | 'casters' | 'slots'>
+): string[] {
+  const m = desc.match(/先决[：:]([^）)\n]+)/)
+  if (!m) return []
+  const out: string[] = []
+  for (const part of m[1].split(/[，,；;]/).map(s => s.trim()).filter(Boolean)) {
+    const lv = part.match(/等级\s*(\d+)/)
+    const score = part.match(/(\d+)\s*\+?$/)
+    const armor = part.match(/(轻甲|中甲|重甲|盾牌)受训/)
+    if (lv) {
+      if (d.level < +lv[1]) out.push(part)
+    } else if (armor) {
+      const key = ({ 轻甲: 'light', 中甲: 'medium', 重甲: 'heavy', 盾牌: 'shield' } as const)[armor[1] as '轻甲']
+      if (!d.profs[key]) out.push(part)
+    } else if (/施法|契约魔法/.test(part)) {
+      if (!d.casters.length && !d.slots.pact) out.push(part)
+    } else if (score) {
+      const groups = parsePrereq(part)
+      if (groups.length && !groups.every(g => g.some(k => d.abilities.total[k] >= +score[1]))) out.push(part)
+    }
+  }
+  return out
 }
 
 /** 种族特质授予的技能熟练（如「小兔感官：你拥有察觉技能的熟练」） */

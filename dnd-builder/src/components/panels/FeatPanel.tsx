@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FeatPage } from '../../types'
 import { loadFeatPageEntity } from '../../data/loader'
 import { allFeatSlots, type FeatSlot } from '../../rules/build'
+import { deriveCharacter, featPrereqUnmet } from '../../rules/character'
 import { Section, type PanelProps } from '../ui'
 
 // ---------- 专长（按升级列表：槽位由职业等级表推导） ----------
@@ -13,6 +14,7 @@ export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
   const bg = loaded.background
   // 兼职时各职业按自己的等级给槽位
   const slots = allFeatSlots(choices, loaded)
+  const d = useMemo(() => deriveCharacter(choices, loaded), [choices, loaded])
 
   const core = book.index.featPages.find(g => g.group === '核心专长')?.entries ?? []
   const originUrl = core.find(e => /起源/.test(e.title))?.url ?? ''
@@ -100,6 +102,7 @@ export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
         const url = urlFor(s)
         const page = pages[url]
         const sel = choices.feats[s.key]
+        const selUnmet = sel ? featPrereqUnmet(sel.desc, d) : []
         return (
           <div className="feat-slot" key={s.key}>
             <span className="feat-slot-label">{s.label}</span>
@@ -136,12 +139,22 @@ export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
             >
               <option value="">— 未选择 —</option>
               {typeof page === 'object' &&
-                page.feats.map(f => (
-                  <option key={f.name} value={f.name} title={f.desc.slice(0, 300)}>
-                    {f.name}
-                  </option>
-                ))}
+                page.feats.map(f => {
+                  const unmet = featPrereqUnmet(f.desc, d)
+                  // 不满足先决的不可选；已选中的保留显示，便于看到原因后再换
+                  return (
+                    <option
+                      key={f.name}
+                      value={f.name}
+                      disabled={unmet.length > 0 && f.name !== sel?.name}
+                      title={f.desc.slice(0, 300)}
+                    >
+                      {f.name}{unmet.length ? `（先决不满足：${unmet.join('，')}）` : ''}
+                    </option>
+                  )
+                })}
             </select>
+            {selUnmet.length > 0 && <span className="meta warn">先决不满足：{selUnmet.join('，')}</span>}
             {page === 'loading' && <span className="meta">⏳</span>}
             {typeof page === 'string' && page.startsWith('err:') && (
               <span className="meta warn">{page.slice(4)}</span>
