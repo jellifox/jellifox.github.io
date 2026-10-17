@@ -88,6 +88,11 @@ export function checklist(d: DerivedCharacter): CheckItem[] {
   const leveled = c.spells.length - cantrips
   if (q.cantrips != null && cantrips < q.cantrips) todo(`戏法还差 ${q.cantrips - cantrips} 个`)
   if (q.prepared != null && leveled < q.prepared) todo(`准备法术还差 ${q.prepared - leveled} 个`)
+  for (const ch of d.featSpellChoices) {
+    const need = ch.groups.reduce((n, g) => n + g.count, 0)
+    const got = d.featSpellPicks[ch.key]?.length ?? 0
+    if (got < need) todo(`${ch.source}：自选法术还差 ${need - got} 个`)
+  }
   const over = c.spells.filter(n => {
     const sp = all.find(s => s.name === n)
     return sp && !spellPreparable(sp, d.instances)

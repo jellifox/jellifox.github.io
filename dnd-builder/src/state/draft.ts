@@ -40,6 +40,7 @@ export const DEFAULT_CHOICES: CharacterChoices = {
   toolChoice: '',
   spells: [],
   spellsText: '',
+  featSpells: {},
   feats: {},
   about: '',
 }

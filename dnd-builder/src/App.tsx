@@ -5,7 +5,6 @@ import {
   loadSpeciesEntity, loadSpellListEntity, loadSubclassEntity, type BookData,
 } from './data/loader'
 import { buildStatblock } from './rules/statblock'
-import { isThirdCasterSubclass } from './rules/multiclass'
 import { DEFAULT_CHOICES } from './state/draft'
 import { exportSave, loadRoster, newCharId, saveRoster, type Roster } from './state/roster'
 import { importCharacter } from './state/importer'
@@ -203,20 +202,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, mcKey])
 
-  // 法术表：起始职业与所有兼职职业的法术并集（总表按职业列筛选）
-  // 奥法骑士/诡术师用法师法术列表，而总表里战士/游荡者没有条目，需要额外并入法师
-  const subTitleOf = (classUrl: string, subUrl: string) =>
-    book?.index.classes.find(c => c.url === classUrl)?.subclasses.find(s => s.url === subUrl)?.title ?? ''
-  const needsWizardList = [
-    subTitleOf(choices.classUrl, choices.subclassUrl),
-    ...(choices.multiclasses ?? []).map(m => subTitleOf(m.classUrl, m.subclassUrl)),
-  ].some(isThirdCasterSubclass)
+  // 法术总表：职业可选范围由法术面板按 spellListNames 从全表筛选（三分之一施法者、魔法奥秘等）
   const classTitlesKey = [choices.classUrl, ...(choices.multiclasses ?? []).map(m => m.classUrl)]
-    .filter(Boolean).join(';') + (needsWizardList ? ';+法师' : '')
+    .filter(Boolean).join(';')
   useEffect(() => {
     if (!book || !choices.classUrl) return trackEntity('spellList', '', null)
     const titles = classTitlesKey.split(';')
-      .map(u => (u === '+法师' ? '法师' : book.index.classes.find(c => c.url === u)?.title))
+      .map(u => book.index.classes.find(c => c.url === u)?.title)
       .filter((t): t is string => !!t)
     const urls = book.index.spellLists.map(s => s.url)
     if (titles.length === 0 || urls.length === 0) return trackEntity('spellList', '', null)

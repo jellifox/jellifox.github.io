@@ -302,9 +302,20 @@ export function maxPreparableRing(inst: ClassInstance): number {
   return -1
 }
 
-/** 法术速查里该职业的名称；三分之一施法者用法师法术列表 */
-export function spellListClassName(inst: ClassInstance): string {
-  return casterType(inst) === 'third' ? '法师' : inst.cls.nameCn.replace(/[（(].*$/, '').trim()
+/**
+ * 该职业可用的法术列表名：三分之一施法者用法师列表；
+ * 吟游诗人 10 级「魔法奥秘」起可从吟游诗人、牧师、德鲁伊、法师列表中准备法术。
+ */
+export function spellListNames(inst: ClassInstance): string[] {
+  if (casterType(inst) === 'third') return ['法师']
+  const own = inst.cls.nameCn.replace(/[（(].*$/, '').trim()
+  const secrets = inst.cls.levels.some(r => r.level <= inst.level && r.features.includes('魔法奥秘'))
+  return secrets ? [own, '牧师', '德鲁伊', '法师'] : [own]
+}
+
+/** 法术是否在该职业可用的列表上（职业名按包含关系匹配，如「奇械师EFA」对「奇械师」） */
+export function onClassList(spell: SpellEntry, inst: ClassInstance): boolean {
+  return spellListNames(inst).some(n => spell.classes.some(c => n.includes(c) || c.includes(n)))
 }
 
 /**
@@ -315,8 +326,7 @@ export function spellPreparable(spell: SpellEntry, instances: ClassInstance[]): 
   return instances.some(inst => {
     const max = maxPreparableRing(inst)
     if (max < 0 || spell.ring > max) return false
-    const n = spellListClassName(inst)
-    return spell.classes.some(c => n.includes(c) || c.includes(n))
+    return onClassList(spell, inst)
   })
 }
 

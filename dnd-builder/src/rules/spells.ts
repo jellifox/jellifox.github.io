@@ -14,7 +14,7 @@ import type {
 } from '../types'
 import { activeFeats, speciesTraits } from './build'
 import { classInstances } from './multiclass'
-import { subclassFeatureLevel } from '../data/parsers'
+import { SPELL_CLASSES, subclassFeatureLevel } from '../data/parsers'
 
 export interface GrantedSpell {
   name: string
@@ -173,5 +173,98 @@ export function grantedSpells(c: CharacterChoices, loaded: LoadedEntities): Gran
   return out.filter(g => g.level <= c.level).sort((a, b) => a.level - b.level)
 }
 
-// ponytail: 专长里「从法师列表中选择两道戏法」这类由玩家自选的法术无法从文本推出，
-// 仍需在法术面板手动勾选；这里只带入写明了具体法术名的部分。
+
+// ---------- 专长/种族里「自选法术」 ----------
+// 魔法学徒：「从牧师、德鲁伊、法师法术列表中选择一个列表…选择两道戏法…再选择一道一环法术」
+// 妖精之触：「选择一道预言或惑控学派的一环法术」；仪式施法者：「数道具有仪式标签的一环法术，数量等于熟练加值」
+
+export interface SpellPickGroup {
+  ring: number
+  count: number
+  /** 限定学派（空 = 不限） */
+  schools: string[]
+  ritual: boolean
+}
+
+export interface FeatSpellChoice {
+  /** choices.featSpells 的键 */
+  key: string
+  source: string
+  /** 可选的职业法术列表（空 = 任意列表） */
+  lists: string[]
+  /** 需要先从 lists 中选定一个列表 */
+  chooseList: boolean
+  groups: SpellPickGroup[]
+}
+
+const SCHOOLS = ['防护', '咒法', '预言', '惑控', '塑能', '幻术', '死灵', '变化']
+const CN_COUNT: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5 }
+const CN_RING: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+
+export function featSpellChoiceIn(desc: string, pb: number): Omit<FeatSpellChoice, 'key' | 'source'> | null {
+  const sentences = desc.split(/[。\n]/)
+  const listsIn = (sen: string) => SPELL_CLASSES.filter(n => sen.includes(`${n}法术列表`) || sen.includes(`${n}列表`))
+  const listSentence = sentences.find(s => /选择一个(?:法术)?列表/.test(s))
+  let lists = listSentence ? listsIn(listSentence) : []
+  const groups: SpellPickGroup[] = []
+  for (const sen of sentences) {
+    const m = sen.match(/选择([一两二三四五数])道([^，。]*?)(戏法|([一二三四五六七八九])环法术)/)
+    if (!m) continue
+    if (!listSentence && !lists.length) lists = listsIn(sen)
+    groups.push({
+      ring: m[3] === '戏法' ? 0 : CN_RING[m[4]],
+      count: m[1] === '数' ? (/熟练加值/.test(sen) ? pb : 1) : CN_COUNT[m[1]],
+      schools: SCHOOLS.filter(x => m[2].includes(x)),
+      ritual: /仪式/.test(m[2]),
+    })
+  }
+  return groups.length ? { lists, chooseList: !!listSentence && lists.length > 1, groups } : null
+}
+
+export function featSpellChoices(c: CharacterChoices, loaded: LoadedEntities, pb: number): FeatSpellChoice[] {
+  const out: FeatSpellChoice[] = []
+  const push = (key: string, source: string, desc: string) => {
+    const ch = featSpellChoiceIn(desc, pb)
+    if (ch) out.push({ key, source, ...ch })
+  }
+  for (const t of speciesTraits(loaded.species, c.subraceChoice)) {
+    if (!parseTraitTable(t)) push(`sp:${t.name}`, `种族·${t.name}`, t.desc)
+  }
+  for (const [k, f] of Object.entries(activeFeats(c, loaded))) push(`feat:${k}`, `专长·${f.name}`, f.desc)
+  return out
+}
+
+/** 该自选项当前生效的列表（未选定时为 null；不限列表时为 ''） */
+export function effectiveSpellList(ch: FeatSpellChoice, chosen: string | undefined): string | null {
+  if (!ch.chooseList) return ch.lists[0] ?? ''
+  return chosen && ch.lists.includes(chosen) ? chosen : null
+}
+
+/** 某组可选的法术 */
+export function spellGroupOptions(g: SpellPickGroup, list: string, dict: SpellEntry[]): SpellEntry[] {
+  return dict.filter(s =>
+    s.ring === g.ring &&
+    (!list || s.classes.some(c => c.includes(list) || list.includes(c))) &&
+    (!g.schools.length || g.schools.includes(s.school)) &&
+    (!g.ritual || s.ritual)
+  )
+}
+
+/** 各自选项里生效的法术：须在所选列表、符合环阶/学派/仪式且不超额 */
+export function featSpellPicks(
+  choices: FeatSpellChoice[],
+  picks: CharacterChoices['featSpells'] | undefined,
+  dict: SpellEntry[]
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const ch of choices) {
+    const sel = picks?.[ch.key]
+    const list = effectiveSpellList(ch, sel?.list)
+    if (list == null) { out[ch.key] = []; continue }
+    out[ch.key] = ch.groups.flatMap(g => {
+      const ok = new Set(spellGroupOptions(g, list, dict).map(s => s.name))
+      return (sel?.spells ?? []).filter(n => ok.has(n)).slice(0, g.count)
+    })
+  }
+  return out
+}

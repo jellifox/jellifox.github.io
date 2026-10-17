@@ -20,7 +20,9 @@ import {
   ARMORS, WEAPONS, armorClassValue, armorTrained, proficiencyBonus, weaponAttackAbility,
   weaponProficient, type ArmorDef, type WeaponDef,
 } from './rules'
-import { grantedSpells, type GrantedSpell } from './spells'
+import {
+  featSpellChoices, featSpellPicks, grantedSpells, type FeatSpellChoice, type GrantedSpell,
+} from './spells'
 import {
   applySkillPicks, expertiseSources, grantedLanguages, languagePicks, skillChoices, toolOptions,
   type ExpertiseSource, type SkillChoice,
@@ -110,6 +112,10 @@ export interface DerivedCharacter {
   feats: FeatEntry[]
   classFeatures: ClassFeatureGroup[]
   granted: GrantedSpell[]
+  /** 专长/种族里的自选法术项（魔法学徒、妖精之触、仪式施法者…） */
+  featSpellChoices: FeatSpellChoice[]
+  /** 各自选项里生效的法术 */
+  featSpellPicks: Record<string, string[]>
   spells: SpellPick[]
   weapons: WeaponAttack[]
   /** 职业资源（写入 limits）与职业数值 */
@@ -236,11 +242,18 @@ function computeCharacter(c: CharacterChoices, loaded: LoadedEntities): DerivedC
   const byName = new Map(
     (loaded.spellList?.all ?? loaded.spellList?.spells ?? []).map(s => [s.name, s])
   )
+  const fsChoices = featSpellChoices(c, loaded, pb)
+  const fsPicks = featSpellPicks(fsChoices, c.featSpells, loaded.spellList?.all ?? [])
+  const seenSpell = new Set(c.spells)
+  const once = (name: string) => (seenSpell.has(name) ? false : (seenSpell.add(name), true))
   const spells: SpellPick[] = [
     ...c.spells.map(name => ({ name, entry: byName.get(name), source: '' })),
     ...granted
-      .filter(g => !c.spells.includes(g.name))
+      .filter(g => once(g.name))
       .map(g => ({ name: g.name, entry: byName.get(g.name), source: g.source })),
+    // 专长/种族自选法术：不占职业名额
+    ...fsChoices.flatMap(ch => fsPicks[ch.key].filter(once)
+      .map(name => ({ name, entry: byName.get(name), source: ch.source }))),
     ...c.spellsText.split('\n').map(s => s.trim()).filter(Boolean)
       .map(name => ({ name, entry: undefined, source: '' })),
   ]
@@ -421,6 +434,8 @@ function computeCharacter(c: CharacterChoices, loaded: LoadedEntities): DerivedC
     feats,
     classFeatures,
     granted,
+    featSpellChoices: fsChoices,
+    featSpellPicks: fsPicks,
     spells,
     weapons,
     resources: classResources(instances, abilities.mods),

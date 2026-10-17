@@ -301,6 +301,8 @@ export interface CharacterChoices {
   toolChoice: string
   spells: string[] // 从法术速查中勾选的法术
   spellsText: string // 额外自由输入的法术
+  /** 专长/种族自选法术：FeatSpellChoice.key -> 所选列表与法术 */
+  featSpells: Record<string, { list: string; spells: string[] }>
   feats: Record<string, TraitEntry> // 槽位 key（origin/style/lv4/lv19epic…）-> 已选专长快照
   about: string
 }

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { ABILITY_CN } from '../../data/mappings'
 import {
-  classInstances, maxPreparableRing, spellAbilityOf, spellPreparable, spellQuotas, spellSlotsFor,
+  classInstances, maxPreparableRing, onClassList, spellAbilityOf, spellPreparable, spellQuotas, spellSlotsFor,
 } from '../../rules/multiclass'
-import { grantedSpells } from '../../rules/spells'
+import { effectiveSpellList, grantedSpells, spellGroupOptions } from '../../rules/spells'
+import { deriveCharacter } from '../../rules/character'
 import { EntityStatus, Section, type PanelProps } from '../ui'
 
 // ---------- 第五步：法术（从法术速查中勾选，覆盖全部扩展书） ----------
@@ -31,7 +32,13 @@ export function SpellPanel({
 
   // 可准备的最高环阶：各职业按自己的等级算，取其中最高者决定显示到哪一环
   const maxRing = Math.max(-1, ...inst.map(maxPreparableRing))
-  const byName = new Map((spellList?.spells ?? []).map(sp => [sp.name, sp]))
+  // 职业可选法术：从全表按各职业可用列表筛选（含三分之一施法者的法师列表、魔法奥秘）
+  const classSpells = useMemo(
+    () => (spellList?.all ?? []).filter(s => inst.some(i => onClassList(s, i))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [spellList, inst.map(i => `${i.cls.id}${i.level}${i.subclass?.id ?? ''}`).join()]
+  )
+  const byName = new Map(classSpells.map(sp => [sp.name, sp]))
   const preparable = (name: string) => {
     const sp = byName.get(name)
     return !sp || spellPreparable(sp, inst)
@@ -39,9 +46,9 @@ export function SpellPanel({
 
   const byRing = useMemo(() => {
     if (!spellList) return []
-    const groups: { ring: number; spells: typeof spellList.spells }[] = []
+    const groups: { ring: number; spells: typeof classSpells }[] = []
     for (let r = 0; r <= Math.max(0, maxRing); r++) {
-      const list = spellList.spells.filter(
+      const list = classSpells.filter(
         s =>
           s.ring === r &&
           (!filter ||
@@ -51,11 +58,22 @@ export function SpellPanel({
       if (list.length) groups.push({ ring: r, spells: list })
     }
     return groups
-  }, [spellList, filter, maxRing])
+  }, [spellList, classSpells, filter, maxRing])
 
   // 空法术表视同没有（非施法职业在总表里没有条目）
-  const hasSpells = (spellList?.spells.length ?? 0) > 0
-  if (!cls || (!hasSlots && !hasSpells && granted.length === 0)) return null
+  const hasSpells = classSpells.length > 0
+  // 专长/种族自选法术（魔法学徒等）：非施法职业也要显示
+  const d = deriveCharacter(choices, loaded)
+  const featChoices = d.featSpellChoices
+  if (!cls && !featChoices.length) return null
+  if (!hasSlots && !hasSpells && granted.length === 0 && !featChoices.length) return null
+
+  function setFeatSpells(key: string, patch: Partial<{ list: string; spells: string[] }>) {
+    update(prev => {
+      const cur = prev.featSpells?.[key] ?? { list: '', spells: [] }
+      return { featSpells: { ...prev.featSpells, [key]: { ...cur, ...patch } } }
+    })
+  }
 
   const slotChips: string[] = []
   for (const [lv, n] of Object.entries(slotInfo.slots)) slotChips.push(`${lv}环 ×${n}`)
@@ -64,7 +82,7 @@ export function SpellPanel({
   }
 
   // 名额：戏法与准备法术分开计数，取自职业等级表；已满时禁止再选（取消始终允许）
-  const isCantrip = (name: string) => spellList?.spells.find(s => s.name === name)?.ring === 0
+  const isCantrip = (name: string) => byName.get(name)?.ring === 0
   const chosenCantrips = choices.spells.filter(isCantrip).length
   const chosenLeveled = choices.spells.length - chosenCantrips
   const maxCantrips = quotas.cantrips
@@ -159,10 +177,74 @@ export function SpellPanel({
         </>
       )}
 
+      {featChoices.map(ch => {
+        const sel = choices.featSpells?.[ch.key]
+        const list = effectiveSpellList(ch, sel?.list)
+        const live = d.featSpellPicks[ch.key] ?? []
+        const total = ch.groups.reduce((n, g) => n + g.count, 0)
+        return (
+          <div key={ch.key} className="feat-spells">
+            <div className="field-label">
+              {ch.source}：自选法术（已选 {live.length}/{total}，不占职业名额）
+              {!ch.chooseList && ch.lists.length > 0 && ` · ${ch.lists.join('、')}法术列表`}
+            </div>
+            {ch.chooseList && (
+              <div className="chip-row">
+                {ch.lists.map(l => (
+                  <button
+                    key={l}
+                    className={`chip small ${list === l ? 'active' : ''}`}
+                    // 换列表时清空已选法术，免得旧列表的法术被静默丢弃后还占着位置
+                    onClick={() => setFeatSpells(ch.key, { list: l, spells: list === l ? sel?.spells ?? [] : [] })}
+                  >
+                    {l}法术列表
+                  </button>
+                ))}
+              </div>
+            )}
+            {list == null ? (
+              <p className="meta">先选择一个法术列表。</p>
+            ) : ch.groups.map((g, gi) => {
+              const opts = spellGroupOptions(g, list, spellList?.all ?? [])
+                .filter(s => !filter || s.name.toLowerCase().includes(filter.toLowerCase()))
+              const chosen = opts.filter(s => live.includes(s.name)).length
+              return (
+                <div key={gi}>
+                  <div className="meta">
+                    {RING_NAMES[g.ring]} × {g.count}
+                    {g.schools.length > 0 && `（${g.schools.join('或')}学派）`}
+                    {g.ritual && '（仪式）'}
+                  </div>
+                  <div className="chip-row">
+                    {opts.map(s => {
+                      const on = live.includes(s.name)
+                      return (
+                        <button
+                          key={s.name}
+                          className={`chip small ${on ? 'active' : ''}`}
+                          disabled={!on && chosen >= g.count}
+                          title={`${s.school} · ${s.source}`}
+                          onClick={() => setFeatSpells(ch.key, {
+                            list: list,
+                            spells: on ? live.filter(n => n !== s.name) : [...live, s.name],
+                          })}
+                        >
+                          {s.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+
       {hasSpells && spellList && (
         <>
           <label>
-            搜索法术（共 {spellList.spells.length} 个）
+            搜索法术（共 {classSpells.length} 个）
             <input
               value={filter}
               placeholder="输入中文/英文名或学派过滤…"

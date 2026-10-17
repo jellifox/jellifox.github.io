@@ -749,6 +749,8 @@ const SPELL_CLASS_CN: Record<string, string> = {
   诗: '吟游诗人', 牧: '牧师', 德: '德鲁伊', 帕: '圣武士', 软: '游侠',
   术: '术士', 锁: '魔契师', 法: '法师', 械: '奇械师',
 }
+/** 万法大全里出现的全部职业法术列表名 */
+export const SPELL_CLASSES = Object.values(SPELL_CLASS_CN)
 
 /**
  * 解析 速查/法术速查/*.html（万法大全速查表）。

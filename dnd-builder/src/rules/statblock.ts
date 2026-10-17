@@ -156,7 +156,8 @@ export function buildStatblock(
     actions,
     special_abilities: specials,
     spell_slots: spellSlots,
-    spells: d.spells.filter(s => !s.source).map(s => s.name),
+    // 特性/专长给的法术同样是角色会的法术（以前被漏掉了）
+    spells: d.spells.map(s => s.name),
     spell_dc: spellDc,
     limits: d.resources.limits,
     spell_attack: spellAttack,
