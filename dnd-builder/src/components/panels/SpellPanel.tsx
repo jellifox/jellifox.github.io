@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ABILITY_CN } from '../../data/mappings'
 import {
-  classInstances, maxPreparableRing, spellAbilityOf, spellPreparable, spellSlotsFor,
+  classInstances, maxPreparableRing, spellAbilityOf, spellPreparable, spellQuotas, spellSlotsFor,
 } from '../../rules/multiclass'
 import { grantedSpells } from '../../rules/spells'
 import { EntityStatus, Section, type PanelProps } from '../ui'
@@ -23,11 +23,8 @@ export function SpellPanel({
   // 兼职时按兼职施法者表合算法术位；契约魔法单列
   const slotInfo = spellSlotsFor(inst)
   // 每个职业在自己的等级上的戏法/准备法术名额（规则：法术准备按职业分别决定）
-  const quotaRows = inst
-    .map(i => ({ i, row: i.cls.levels.find(r => r.level === i.level) }))
-    .filter(x => x.row && (x.row.cantrips != null || x.row.preparedSpells != null))
-  const sumOrNull = (vals: (number | undefined)[]) =>
-    vals.some(v => v != null) ? vals.reduce<number>((n, v) => n + (v ?? 0), 0) : null
+  const quotas = spellQuotas(inst)
+  const quotaRows = quotas.rows
   // 特性赋予的法术（种族/子职/专长），不占名额
   const granted = useMemo(() => grantedSpells(choices, loaded), [choices, loaded])
   const hasSlots = Object.keys(slotInfo.slots).length > 0 || !!slotInfo.pact
@@ -70,8 +67,8 @@ export function SpellPanel({
   const isCantrip = (name: string) => spellList?.spells.find(s => s.name === name)?.ring === 0
   const chosenCantrips = choices.spells.filter(isCantrip).length
   const chosenLeveled = choices.spells.length - chosenCantrips
-  const maxCantrips = sumOrNull(quotaRows.map(x => x.row!.cantrips))
-  const maxPrepared = sumOrNull(quotaRows.map(x => x.row!.preparedSpells))
+  const maxCantrips = quotas.cantrips
+  const maxPrepared = quotas.prepared
   const grantedNames = new Set(granted.map(g => g.name))
 
   function quotaFull(name: string): boolean {

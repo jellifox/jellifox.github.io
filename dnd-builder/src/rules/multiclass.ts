@@ -384,3 +384,25 @@ export function proficiencySummary(instances: ClassInstance[]): ProficiencySumma
   out.tools = [...tools].join('、')
   return out
 }
+
+/**
+ * 戏法/准备法术名额：各职业按自己的等级取职业表（规则：法术准备按职业分别决定），再求和。
+ * 没有任何职业给该项时为 null（不限）。
+ */
+export function spellQuotas(instances: ClassInstance[]) {
+  const rows = instances
+    .map(i => ({ i, row: i.cls.levels.find(r => r.level === i.level) }))
+    .filter(x => x.row && (x.row.cantrips != null || x.row.preparedSpells != null))
+  const sumOrNull = (vals: (number | undefined)[]) =>
+    vals.some(v => v != null) ? vals.reduce<number>((n, v) => n + (v ?? 0), 0) : null
+  return {
+    rows,
+    cantrips: sumOrNull(rows.map(x => x.row!.cantrips)),
+    prepared: sumOrNull(rows.map(x => x.row!.preparedSpells)),
+  }
+}
+
+/** 子职解锁等级：职业表里第一个「…子职」特性所在等级（缺省 3） */
+export function subclassLevel(cls: ClassData): number {
+  return cls.levels.find(r => r.features.some(f => /子职/.test(f)))?.level ?? 3
+}

@@ -10,7 +10,7 @@ import { DEFAULT_CHOICES } from './state/draft'
 import { exportSave, loadRoster, newCharId, saveRoster, type Roster } from './state/roster'
 import { importCharacter } from './state/importer'
 import {
-  AbilityPanel, BasicsPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SkillPanel, SpellPanel,
+  AbilityPanel, BasicsPanel, ChecklistPanel, ClassPanel, FeatPanel, GearPanel, OriginPanel, SkillPanel, SpellPanel,
 } from './components/panels'
 import { SheetPane } from './components/sheet'
 
@@ -306,6 +306,7 @@ export default function App() {
           )}
           {book && (
             <>
+              <ChecklistPanel choices={choices} loaded={loaded} />
               <BasicsPanel choices={choices} update={update} />
               <ClassPanel
                 book={book}

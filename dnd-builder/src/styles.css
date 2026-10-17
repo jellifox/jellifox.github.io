@@ -710,3 +710,16 @@ textarea:focus {
   margin-top: 10px;
   font-size: 13px;
 }
+
+.checklist ul {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  font-size: 13px;
+  display: grid;
+  gap: 3px;
+}
+
+.checklist li.warn {
+  color: var(--gold);
+}
