@@ -6,7 +6,7 @@
 import type {
   AbilityKey, CharacterChoices, LoadedEntities, SkillKey, SpellEntry, TraitEntry,
 } from '../types'
-import { RARE_LANGUAGES, SKILL_ABILITY, SKILL_KEYS, STANDARD_LANGUAGES, cnToSkill } from '../data/mappings'
+import { ABILITY_CN, RARE_LANGUAGES, SKILL_ABILITY, SKILL_KEYS, STANDARD_LANGUAGES, cnToSkill } from '../data/mappings'
 import { subclassFeatureLevel } from '../data/parsers'
 import {
   activeFeats, allFeatSlots, deriveAbilities, deriveHp, effectiveSubrace,
@@ -22,8 +22,8 @@ import {
 } from './rules'
 import { grantedSpells, type GrantedSpell } from './spells'
 import {
-  LANGUAGE_PICKS, expertiseSources, grantedLanguages, pickedSkills, skillChoices, toolOptions,
-  type SkillChoice,
+  applySkillPicks, expertiseSources, grantedLanguages, languagePicks, skillChoices, toolOptions,
+  type ExpertiseSource, type SkillChoice,
 } from './skills'
 import { classResources, type ClassResources } from './resources'
 
@@ -84,9 +84,11 @@ export interface DerivedCharacter {
   profSkills: Set<SkillKey>
   /** 种族/专长里的自选技能熟练 */
   skillChoices: SkillChoice[]
-  expertiseSources: { source: string; count: number }[]
+  expertiseSources: ExpertiseSource[]
   expertiseCount: number
-  /** 生效的专精技能 */
+  /** 各来源里生效的专精选择 */
+  expertiseBySource: Record<string, SkillKey[]>
+  /** 全部生效的专精技能（含轶闻知识等「已熟练则专精」） */
   expertise: SkillKey[]
   /** 万事通：非熟练技能加一半熟练加值 */
   jack: boolean
@@ -94,6 +96,8 @@ export interface DerivedCharacter {
   initiative: number
   /** 特性直接给的语言（不占自选名额） */
   grantedLanguages: string[]
+  /** 自选语言名额 */
+  languagePicks: number
   /** 最终语言：通用语 + 赋予 + 自选（超出名额的不计） */
   languages: string[]
   /** 背景工具（已代入具体选择）+ 兼职工具 */
@@ -178,7 +182,8 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     ...traitSkills(spTraits),
   ])
   const choicesOfSkills = skillChoices(c, loaded)
-  for (const s of pickedSkills(choicesOfSkills, c.skillPicks)) profSkills.add(s)
+  const picked = applySkillPicks(choicesOfSkills, c.skillPicks, profSkills)
+  for (const s of picked.proficient) profSkills.add(s)
 
   // ---- 专长：起源 + 仍存在的升级槽位 ----
   const live = activeFeats(c, loaded)
@@ -276,9 +281,18 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     })
 
   // ---- 技能：专精、万事通、先攻 ----
-  const expSources = expertiseSources(instances, Object.values(live))
+  // 专精按来源分别选：须已熟练、在该来源的选项内、且不与已有专精重复
+  const expSources = expertiseSources(instances, live)
   const expertiseCount = expSources.reduce((n, s) => n + s.count, 0)
-  const expertise = (c.expertise ?? []).filter(s => profSkills.has(s)).slice(0, expertiseCount)
+  const expertise: SkillKey[] = [...picked.expertise]
+  const expertiseBySource: Record<string, SkillKey[]> = {}
+  for (const src of expSources) {
+    const ok = (c.expertisePicks?.[src.key] ?? [])
+      .filter(s => profSkills.has(s) && (!src.options || src.options.includes(s)) && !expertise.includes(s))
+      .slice(0, src.count)
+    expertiseBySource[src.key] = ok
+    expertise.push(...ok)
+  }
   const jack = gained.some(g => g.names.includes('万事通'))
   const skillBonus = Object.fromEntries(SKILL_KEYS.map(s => {
     const prof = expertise.includes(s) ? 2 * pb : profSkills.has(s) ? pb : jack ? Math.floor(pb / 2) : 0
@@ -290,7 +304,8 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
   const langsGranted = grantedLanguages(
     species?.languageText ?? '', gained.flatMap(g => g.names), [...STANDARD_LANGUAGES, ...RARE_LANGUAGES.map(r => r.name)]
   )
-  const freeLangs = c.languages.filter(l => l !== '通用语' && !langsGranted.includes(l)).slice(0, LANGUAGE_PICKS)
+  const langPicks = languagePicks(gained.flatMap(g => g.names))
+  const freeLangs = c.languages.filter(l => l !== '通用语' && !langsGranted.includes(l)).slice(0, langPicks)
   const languages = [...new Set(['通用语', ...langsGranted, ...freeLangs])]
   const toolOpts = bg ? toolOptions(bg.tool) : null
   const bgTool = toolOpts?.includes(c.toolChoice) ? c.toolChoice : bg?.tool ?? ''
@@ -316,6 +331,15 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
         if (!c.shield) formulas.push({ label: '无甲防御（感知）', ac: 10 + mods.DEX + mods.WIS })
       } else {
         formulas.push({ label: '无甲防御（体质）', ac: 10 + mods.DEX + mods.CON })
+      }
+    }
+    // 子职的无甲 AC 公式，如龙族体魄「未着装护甲时，你的基础AC等于10+你的敏捷调整值＋你的魅力调整值」
+    for (const { inst } of gained) {
+      for (const f of inst.subclass?.features ?? []) {
+        if (subclassFeatureLevel(f.name) > inst.level) continue
+        const m = f.desc.match(/基础\s*AC\s*等于\s*10\s*[+＋]\s*你的敏捷调整值\s*[+＋]\s*你的(\S{2})调整值/)
+        const ab = m && (Object.entries(ABILITY_CN).find(([, cn]) => cn === m[1])?.[0] as AbilityKey | undefined)
+        if (ab) formulas.push({ label: `${f.name.replace(/^\d+\s*级\s*[：:]/, '').replace(/\s*[A-Za-z].*$/, '')}（${m![1]}）`, ac: 10 + mods.DEX + mods[ab] })
       }
     }
   }
@@ -367,11 +391,13 @@ export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): De
     skillChoices: choicesOfSkills,
     expertiseSources: expSources,
     expertiseCount,
+    expertiseBySource,
     expertise,
     jack,
     skillBonus,
     initiative,
     grantedLanguages: langsGranted,
+    languagePicks: langPicks,
     languages,
     tools,
     passivePerception: 10 + skillBonus.perception,

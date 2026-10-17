@@ -39,6 +39,8 @@ export function FeatPanel({ book, choices, update, loaded }: PanelProps) {
   const urlFor = (s: FeatSlot) =>
     s.kind === 'style'
       ? styleUrl
+      : s.kind === 'origin'
+      ? originUrl
       : slotPage[s.key] ?? (s.kind === 'epic' ? epicDefault : generalDefault)
 
   const needed = [

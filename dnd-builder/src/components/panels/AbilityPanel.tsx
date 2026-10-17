@@ -421,6 +421,7 @@ function HpBlock({
         {multiDie && '（兼职职业从其第一级起就按升级计算，不取最大值）'}
         ，每级再加体质调整值 {fmtMod(conMod)}
         {hp.bonusPerLevel > 0 && `，另有每级 +${hp.bonusPerLevel}（种族/专长）`}
+        {hp.featureNotes.length > 0 && `，子职加成：${hp.featureNotes.join('、')}`}
         {choices.hpMethod === 'manual' && '（手动模式下不叠加任何加成）'}
       </div>
 

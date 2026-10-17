@@ -287,8 +287,8 @@ export interface CharacterChoices {
   classSkills: SkillKey[]
   /** 种族/专长自选技能：SkillChoice.key -> 所选技能 */
   skillPicks: Record<string, SkillKey[]>
-  /** 专精技能（须已熟练；超出名额的保留但不生效） */
-  expertise: SkillKey[]
+  /** 专精：ExpertiseSource.key -> 所选技能（须已熟练；超出名额的保留但不生效） */
+  expertisePicks: Record<string, SkillKey[]>
   classEquipChoice: number
   bgEquipChoice: number
   armorId: string

@@ -14,6 +14,8 @@ export interface SkillChoice {
   count: number
   /** null = 任意技能 */
   options: SkillKey[] | null
+  /** 「如果你已有熟练，则你获得其专精」：选已熟练的技能时改为获得专精 */
+  upgrade: boolean
 }
 
 const CN_NUM: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4 }
@@ -28,15 +30,19 @@ function skillsMentioned(line: string): SkillKey[] {
 }
 
 /** 一段描述里的自选技能熟练（逐行判断，专长的每条增益是一行） */
-export function skillChoicesIn(desc: string): { count: number; options: SkillKey[] | null }[] {
-  const out: { count: number; options: SkillKey[] | null }[] = []
+export function skillChoicesIn(desc: string): Omit<SkillChoice, 'key' | 'source'>[] {
+  const out: Omit<SkillChoice, 'key' | 'source'>[] = []
   for (const line of desc.split('\n')) {
     if (!/技能/.test(line) || !/熟练/.test(line) || !/自选|之一|选择/.test(line)) continue
     // 「选择一个拥有其熟练但不具备相应专精的技能」是专精，不是熟练
     if (/拥有其熟练但/.test(line)) continue
     const n = line.match(/(?:共计)?([一两二三四])(?:项|个|种)/)
     const opts = skillsMentioned(line)
-    out.push({ count: n ? CN_NUM[n[1]] : 1, options: opts.length >= 2 ? opts : null })
+    out.push({
+      count: n ? CN_NUM[n[1]] : 1,
+      options: opts.length >= 2 ? opts : null,
+      upgrade: /已有熟练[^。]*专精/.test(line),
+    })
   }
   return out
 }
@@ -60,27 +66,66 @@ export function skillChoices(c: CharacterChoices, loaded: LoadedEntities): Skill
   return out
 }
 
-/** 已生效的自选技能（只认选项内、未超额的） */
-export function pickedSkills(choices: SkillChoice[], picks: Record<string, SkillKey[]> | undefined): SkillKey[] {
-  return choices.flatMap(ch =>
-    (picks?.[ch.key] ?? []).filter(s => !ch.options || ch.options.includes(s)).slice(0, ch.count)
-  )
+/** 某个自选项里生效的选择（只认选项内、未超额的） */
+export function validPicks(ch: SkillChoice, picks: Record<string, SkillKey[]> | undefined): SkillKey[] {
+  return (picks?.[ch.key] ?? []).filter(s => !ch.options || ch.options.includes(s)).slice(0, ch.count)
 }
 
-/** 专精名额：职业特性 + 专长 */
+/**
+ * 应用自选技能。base = 其他来源已有的熟练。
+ * 带 upgrade 的自选项（轶闻知识等）选到已熟练技能时给专精而非熟练。
+ */
+export function applySkillPicks(
+  choices: SkillChoice[],
+  picks: Record<string, SkillKey[]> | undefined,
+  base: Set<SkillKey>
+): { proficient: SkillKey[]; expertise: SkillKey[] } {
+  const proficient: SkillKey[] = []
+  const expertise: SkillKey[] = []
+  // 先处理普通自选，再处理 upgrade 项，这样「先熟练再专精」的组合也能成立
+  for (const ch of [...choices.filter(c => !c.upgrade), ...choices.filter(c => c.upgrade)]) {
+    for (const s of validPicks(ch, picks)) {
+      if (ch.upgrade && (base.has(s) || proficient.includes(s))) expertise.push(s)
+      else proficient.push(s)
+    }
+  }
+  return { proficient, expertise }
+}
+
+export interface ExpertiseSource {
+  /** choices.expertisePicks 的键 */
+  key: string
+  source: string
+  count: number
+  /** null = 任一已熟练技能 */
+  options: SkillKey[] | null
+}
+
+/** 法师「学者」限定的学术技能 */
+const SCHOLAR_SKILLS: SkillKey[] = ['arcana', 'history', 'investigation', 'medicine', 'nature', 'religion']
+
+/** 专精名额：职业特性（专精 2、熟练探险家 1、学者 1 限学术技能）+ 专长（技艺专家等） */
 export function expertiseSources(
   instances: ClassInstance[],
-  feats: TraitEntry[]
-): { source: string; count: number }[] {
-  const out: { source: string; count: number }[] = []
+  feats: Record<string, TraitEntry>
+): ExpertiseSource[] {
+  const out: ExpertiseSource[] = []
   for (const inst of instances) {
     for (const f of gainedFeatures(inst.cls, inst.level)) {
       const n = f.name === '专精' ? 2 : /熟练探险家|^学者$/.test(f.name) ? 1 : 0
-      if (n) out.push({ source: `${inst.cls.nameCn}${f.level}级·${f.name}`, count: n })
+      if (!n) continue
+      out.push({
+        key: `${inst.keyPrefix}lv${f.level}:${f.name}`,
+        source: `${inst.cls.nameCn}${f.level}级·${f.name}`,
+        count: n,
+        options: f.name === '学者' ? SCHOLAR_SKILLS : null,
+      })
     }
   }
-  for (const f of feats) {
-    if (/拥有其熟练但不具备相应\s*专精/.test(f.desc)) out.push({ source: f.name, count: 1 })
+  for (const [k, f] of Object.entries(feats)) {
+    if (/拥有其熟练但不具备相应\s*专精/.test(f.desc)) {
+      out.push({ key: `feat:${k}`, source: f.name, count: 1, options: null })
+    }
   }
   return out
 }
@@ -108,6 +153,11 @@ export function toolOptions(text: string): string[] | null {
 
 /** 2024：通用语 + 自选 2 种 */
 export const LANGUAGE_PICKS = 2
+
+/** 自选语言名额：基础 2 种 + 游侠「熟练探险家」2 种 */
+export function languagePicks(featureNames: string[]): number {
+  return LANGUAGE_PICKS + (featureNames.includes('熟练探险家') ? 2 : 0)
+}
 
 const LANG_TOKEN = /(?:^|[、，,和写及与：:\s解])([\u4e00-\u9fa5]{1,4}?语)(?=[（(、，,。和及与\s]|$)/g
 

@@ -4,7 +4,7 @@ import { ABILITY_CN, SKILL_CN, RARE_LANGUAGES, STANDARD_LANGUAGES } from '../../
 import { effectiveBgChoice, effectiveSubrace, speciesTraits } from '../../rules/build'
 import { effectiveTraitOption, traitTables } from '../../rules/spells'
 import { deriveCharacter } from '../../rules/character'
-import { LANGUAGE_PICKS, toolOptions } from '../../rules/skills'
+import { toolOptions } from '../../rules/skills'
 import { EntityStatus, Section, type PanelProps } from '../ui'
 
 // ---------- 第二步：起源（种族 + 背景 + 语言） ----------
@@ -238,7 +238,7 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
 
       <div className="field-label">
         语言：通用语{d.grantedLanguages.length ? ` + 特性赋予（${d.grantedLanguages.join('、')}）` : ''}
-        {' '}+ 自选 {LANGUAGE_PICKS} 种（已选 {freeLangs.length}）
+        {' '}+ 自选 {d.languagePicks} 种（已选 {freeLangs.length}）
       </div>
       {(['标准语言', '稀有语言（通常来自种族/职业/背景特性）'] as const).map((label, gi) => (
         <div key={label}>
@@ -251,7 +251,7 @@ export function OriginPanel({ book, choices, update, loaded, flags }: PanelProps
                 <button
                   key={name}
                   className={`chip small ${on ? 'active' : ''}`}
-                  disabled={granted || (!on && freeLangs.length >= LANGUAGE_PICKS)}
+                  disabled={granted || (!on && freeLangs.length >= d.languagePicks)}
                   title={granted ? '已自动获得' : origin ? `起源：${origin}` : undefined}
                   onClick={() => toggleLanguage(name)}
                 >

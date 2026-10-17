@@ -1,6 +1,7 @@
 // 角色规则的基础构件：属性值、生命值、专长槽位、种族特质/亚种、属性加值分配。
 // 完整角色由 character.ts 的 deriveCharacter 组装，statblock.ts / mianbuan.ts 只做序列化。
 
+import { subclassFeatureLevel } from '../data/parsers'
 import type {
   AbilityKey, BackgroundData, CharacterChoices, ClassData, LoadedEntities,
   SpeciesData, TraitEntry,
@@ -74,8 +75,9 @@ export function deriveHp(
   loaded: LoadedEntities,
   spTraits: TraitEntry[],
   conMod: number
-): { max: number; hitDie: number; dice: number[]; bonusPerLevel: number; source: string } {
-  const seq = hitDieSequence(classInstances(c, loaded))
+): { max: number; hitDie: number; dice: number[]; bonusPerLevel: number; featureNotes: string[]; source: string } {
+  const instances = classInstances(c, loaded)
+  const seq = hitDieSequence(instances)
   const hitDie = seq[0] ?? 8
   // 职业尚未加载时按 d8 占位，保证有结果
   const dice = seq.length ? seq : Array.from({ length: c.level }, () => 8)
@@ -85,8 +87,23 @@ export function deriveHp(
   if (spTraits.some(t => /生命值上限加1/.test(t.desc))) bonusPerLevel += 1
   if (Object.values(activeFeats(c, loaded)).some(f => /强健身心|Tough/i.test(f.name))) bonusPerLevel += 2
 
+  // 子职的生命值上限加成。龙族体魄：「生命值上限提升3，此后每提升一个术士等级，都将再次提升1」
+  // = 3 + (职业等级 − 3)；2014 版「增加1，并且每当你获得一个术士等级时再增加1」同理
+  let featureBonus = 0
+  const featureNotes: string[] = []
+  for (const i of instances) {
+    for (const f of i.subclass?.features ?? []) {
+      const lv = subclassFeatureLevel(f.name)
+      const m = f.desc.match(/生命值(?:上限|最大值)(?:提升|增加)\s*(\d+)[^。]*?。?[^。]{0,4}?(?:此后|之后|每当)[^。]{0,14}?等级[^。]{0,12}?(?:提升|增加)\s*1/)
+      if (!m || lv > i.level) continue
+      const n = +m[1] + (i.level - lv)
+      featureBonus += n
+      featureNotes.push(`${f.name.replace(/^\d+\s*级\s*[：:]/, '').replace(/\s*[A-Za-z].*$/, '')} +${n}`)
+    }
+  }
+
   if (c.hpMethod === 'manual' && c.hpManual != null) {
-    return { max: Math.max(1, c.hpManual), hitDie, dice, bonusPerLevel, source: '手动指定' }
+    return { max: Math.max(1, c.hpManual), hitDie, dice, bonusPerLevel, featureNotes: [], source: '手动指定' }
   }
   let base = dice[0] + conMod
   for (let i = 1; i < dice.length; i++) {
@@ -96,10 +113,11 @@ export function deriveHp(
     base += r + conMod
   }
   return {
-    max: Math.max(dice.length, base) + bonusPerLevel * dice.length,
+    max: Math.max(dice.length, base) + bonusPerLevel * dice.length + featureBonus,
     hitDie,
     dice,
     bonusPerLevel,
+    featureNotes,
     source: c.hpMethod === 'roll' ? '逐级投骰' : '固定平均值',
   }
 }
@@ -109,7 +127,7 @@ export function deriveHp(
 export interface FeatSlot {
   key: string // choices.feats 的键（兼职职业带 'mc:<classUrl>:' 前缀）
   label: string
-  kind: 'general' | 'style' | 'epic'
+  kind: 'general' | 'style' | 'epic' | 'origin'
   level: number // 该槽位对应的职业等级
 }
 
@@ -163,7 +181,14 @@ export function featSlots(
 export function allFeatSlots(c: CharacterChoices, loaded: LoadedEntities): FeatSlot[] {
   const inst = classInstances(c, loaded)
   const tag = inst.length > 1
-  return inst.flatMap(i => featSlots(i.cls, i.level, i.keyPrefix, tag ? `${i.cls.nameCn}` : ''))
+  const out = inst.flatMap(i => featSlots(i.cls, i.level, i.keyPrefix, tag ? `${i.cls.nameCn}` : ''))
+  // 种族给的额外起源专长（人类「多才多艺：你获得一项自选的起源专长」）
+  const versatile = speciesTraits(loaded.species ?? undefined, c.subraceChoice)
+    .find(t => /获得一[项个](?:自选的?)?起源专长/.test(t.desc))
+  if (versatile) {
+    out.unshift({ key: 'species-origin', label: `种族·${versatile.name.replace(/[A-Za-z\s]+$/, '')} · 起源专长`, kind: 'origin', level: 1 })
+  }
+  return out
 }
 
 /**

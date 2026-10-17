@@ -7,7 +7,7 @@ import { featPrereqUnmet, type DerivedCharacter } from './character'
 import {
   multiclassProfs, prereqLabel, prereqOf, spellPreparable, spellQuotas, subclassLevel, unmetPrereq,
 } from './multiclass'
-import { LANGUAGE_PICKS, toolOptions } from './skills'
+import { toolOptions, validPicks } from './skills'
 
 export interface CheckItem {
   level: 'todo' | 'warn'
@@ -60,13 +60,19 @@ export function checklist(d: DerivedCharacter): CheckItem[] {
 
   // ---- 技能、语言、工具 ----
   for (const ch of d.skillChoices) {
-    const n = (c.skillPicks?.[ch.key] ?? []).filter(s => !ch.options || ch.options.includes(s)).slice(0, ch.count).length
+    const n = validPicks(ch, c.skillPicks).length
     if (n < ch.count) todo(`${ch.source}：自选技能还差 ${ch.count - n} 项`)
   }
-  if (d.expertise.length < d.expertiseCount) todo(`专精还差 ${d.expertiseCount - d.expertise.length} 项`)
+  for (const src of d.expertiseSources) {
+    const ok = d.expertiseBySource[src.key] ?? []
+    if (ok.length < src.count) todo(`${src.source}：专精还差 ${src.count - ok.length} 项`)
+    // 熟练被撤销、或与别处专精重复后，原先的选择不再生效
+    const lost = (c.expertisePicks?.[src.key] ?? []).filter(s => !ok.includes(s))
+    if (lost.length) warn(`${src.source}：专精选择已失效（${lost.map(s => SKILL_CN[s]).join('、')}）`)
+  }
   if (d.masteryIds.length < d.masteryCount) todo(`武器精通还差 ${d.masteryCount - d.masteryIds.length} 项`)
   const freeLangs = d.languages.filter(l => l !== '通用语' && !d.grantedLanguages.includes(l)).length
-  if (freeLangs < LANGUAGE_PICKS) todo(`自选语言还差 ${LANGUAGE_PICKS - freeLangs} 种`)
+  if (freeLangs < d.languagePicks) todo(`自选语言还差 ${d.languagePicks - freeLangs} 种`)
   const toolOpts = loaded.background ? toolOptions(loaded.background.tool) : null
   if (toolOpts && !toolOpts.includes(c.toolChoice)) todo(`背景工具：${loaded.background!.tool}`)
 
@@ -88,8 +94,5 @@ export function checklist(d: DerivedCharacter): CheckItem[] {
   })
   if (over.length) warn(`超出可准备环阶的法术：${over.join('、')}`)
 
-  // 专精只能选熟练技能：熟练被撤销后选择失效
-  const lostExpertise = (c.expertise ?? []).filter(s => !d.profSkills.has(s))
-  if (lostExpertise.length) warn(`专精选择已失效（不再熟练）：${lostExpertise.map(s => SKILL_CN[s]).join('、')}`)
   return out
 }

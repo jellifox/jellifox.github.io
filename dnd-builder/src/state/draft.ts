@@ -29,7 +29,7 @@ export const DEFAULT_CHOICES: CharacterChoices = {
   rollSetIndex: -1,
   classSkills: [],
   skillPicks: {},
-  expertise: [],
+  expertisePicks: {},
   classEquipChoice: 0,
   bgEquipChoice: 0,
   armorId: 'none',

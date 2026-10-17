@@ -6,9 +6,9 @@ import { choices, corvum, elf, generalFeats, loaded, sorcerer } from '../test/fi
 describe('skillChoicesIn', () => {
   it('识别限定选项与任意技能', () => {
     expect(skillChoicesIn('你具有洞悉、察觉或求生之一技能的熟练。'))
-      .toEqual([{ count: 1, options: ['insight', 'perception', 'survival'] }])
-    expect(skillChoicesIn('你获得一项自选技能的熟练。')).toEqual([{ count: 1, options: null }])
-    expect(skillChoicesIn('你获得共计三项自选的技能和工具熟练。')).toEqual([{ count: 3, options: null }])
+      .toEqual([{ count: 1, options: ['insight', 'perception', 'survival'], upgrade: false }])
+    expect(skillChoicesIn('你获得一项自选技能的熟练。')).toEqual([{ count: 1, options: null, upgrade: false }])
+    expect(skillChoicesIn('你获得共计三项自选的技能和工具熟练。')).toEqual([{ count: 3, options: null, upgrade: false }])
     // 固定熟练与专精条目都不是自选熟练
     expect(skillChoicesIn('你拥有洞悉技能的熟练项。')).toEqual([])
     expect(skillChoicesIn('专精Expertise。 你选择一个拥有其熟练但不具备相应专精的技能，并获得其专精。')).toEqual([])
@@ -23,8 +23,8 @@ describe('skillChoicesIn', () => {
 
   it('技艺专家：一项自选熟练（专精条目不算）', () => {
     const f = generalFeats.find(x => /技艺专家/.test(x.name))!
-    expect(skillChoicesIn(f.desc)).toEqual([{ count: 1, options: null }])
-    expect(expertiseSources([], [f])).toEqual([{ source: f.name, count: 1 }])
+    expect(skillChoicesIn(f.desc)).toEqual([{ count: 1, options: null, upgrade: false }])
+    expect(expertiseSources([], { lv4: f })).toEqual([{ key: 'feat:lv4', source: f.name, count: 1, options: null }])
   })
 })
 
@@ -43,7 +43,7 @@ describe('deriveCharacter 技能', () => {
   })
 
   it('无专精来源时专精选择不生效', () => {
-    const d = deriveCharacter(choices({ level: 5, classUrl: 's', classSkills: ['arcana'], expertise: ['arcana'] }), loaded({ cls: sorcerer }))
+    const d = deriveCharacter(choices({ level: 5, classUrl: 's', classSkills: ['arcana'], expertisePicks: { x: ['arcana'] } }), loaded({ cls: sorcerer }))
     expect(d.expertiseCount).toBe(0)
     expect(d.skillBonus.arcana).toBe(3)
   })
