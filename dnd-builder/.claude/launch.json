@@ -4,8 +4,24 @@
     {
       "name": "dnd-builder",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5180"],
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5180"
+      ],
       "port": 5180
+    },
+    {
+      "name": "site-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8899",
+        "--directory",
+        ".."
+      ],
+      "port": 8899
     }
   ]
 }

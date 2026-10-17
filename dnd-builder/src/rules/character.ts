@@ -164,7 +164,19 @@ function traitSkills(traits: TraitEntry[]): SkillKey[] {
   return out
 }
 
+// 一次渲染里各面板、预览、面团导出都会用同一对 (choices, loaded) 调用本函数；
+// React 状态不可变，按引用记住上一次结果即可让每次编辑只推导一遍。
+// ponytail: 单条缓存，若出现交替推导两个角色的场景再换成 WeakMap
+let last: { c: CharacterChoices; loaded: LoadedEntities; d: DerivedCharacter } | null = null
+
 export function deriveCharacter(c: CharacterChoices, loaded: LoadedEntities): DerivedCharacter {
+  if (last?.c === c && last.loaded === loaded) return last.d
+  const d = computeCharacter(c, loaded)
+  last = { c, loaded, d }
+  return d
+}
+
+function computeCharacter(c: CharacterChoices, loaded: LoadedEntities): DerivedCharacter {
   const species = loaded.species ?? undefined
   const bg = loaded.background ?? undefined
   const instances = classInstances(c, loaded)

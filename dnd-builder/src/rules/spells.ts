@@ -76,13 +76,29 @@ function cnPart(name: string): string {
  * 对速查「舞光术Dancing Lights」），按全名匹配会漏掉。
  * 长名优先，避免「光亮术」把「光亮」类短名重复计入。
  */
+// 按中文名长度降序的词典；每张法术表只算一次（以前每段文字都整表复制+排序，单次推导 6ms）
+const sortedDicts = new WeakMap<SpellEntry[], { name: string; cn: string }[]>()
+function sortedDict(dict: SpellEntry[]) {
+  let v = sortedDicts.get(dict)
+  if (!v) {
+    v = dict
+      .map(s => ({ name: s.name, cn: cnPart(s.name) }))
+      .filter(x => x.cn.length >= 2)
+      .sort((a, b) => b.cn.length - a.cn.length)
+    sortedDicts.set(dict, v)
+  }
+  return v
+}
+
 function spellsIn(text: string, dict: SpellEntry[]): string[] {
   const flat = text.replace(/\s+/g, '')
   const hits: string[] = []
-  for (const s of [...dict].sort((a, b) => cnPart(b.name).length - cnPart(a.name).length)) {
-    const cn = cnPart(s.name)
-    if (cn.length < 2) continue
-    if (flat.includes(cn) && !hits.some(h => cnPart(h).includes(cn))) hits.push(s.name)
+  const hitCns: string[] = []
+  for (const { name, cn } of sortedDict(dict)) {
+    if (flat.includes(cn) && !hitCns.some(h => h.includes(cn))) {
+      hits.push(name)
+      hitCns.push(cn)
+    }
   }
   return hits
 }
